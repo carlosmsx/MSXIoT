@@ -72,19 +72,37 @@ CMDS:
 
 	DEFB	"WLIST",0      ; 
 	DEFW	_WLIST
+DEFB	"WCLIST",0      ; 
+	DEFW	_WCLIST
 
 	DEFB	"TEST",0      ; 
 	DEFW	_TEST
 	
 	DEFB	"WNET",0     ; 
 	DEFW	_WNET
-
+	DEFB	"WPASS",0     ; 
+	DEFW	_WPASS
+	DEFB	"WCONNECT",0     ; 
+	DEFW	_WCONNECT
+	DEFB	"WDISCONNECT",0     ; 
+	DEFW	_WDISCONNECT
+	DEFB	"WSTATUS",0     ; 
+	DEFW	_WSTATUS
+	DEFB	"WBLOAD",0     ; 
+	DEFW	_WBLOAD
+	DEFB	"WLOAD",0     ; 
+	DEFW	_WLOAD
 	DEFB	0               ; No more commands
 
 ;---------------------------
+_WCLIST:
+	PUSH	HL
+	LD		A,#11
+	JR		WLIST
 _WLIST:
 	PUSH	HL
 	LD		A,#10
+WLIST:
 	OUT		(CMDPORT),A
 .LOOP1
 	CALL	DEMORA
@@ -134,22 +152,65 @@ _WNET:
     CALL    GETSTRPNT
 .LOOP
     LD      A,(HL)
-    CALL    .LCASE
     CALL    CHPUT  ;Print
     INC     HL
     DJNZ    .LOOP
-
 	POP	HL
 	OR      A
 	RET
 
-.LCASE:
-    CP      "A"
-    RET     C
-    CP      "Z"+1
-    RET     NC
-    OR      %00100000
+_WPASS:
+	CALL	EVALTXTPARAM	; Evaluate text parameter
+	PUSH	HL
+    CALL    GETSTRPNT
+.LOOP
+    LD      A,(HL)
+    CALL    CHPUT  ;Print
+    INC     HL
+    DJNZ    .LOOP
+	POP	HL
+	OR      A
     RET
+
+_WCONNECT:
+	OR		A
+	RET
+	
+_WDISCONNECT:
+	OR		A
+	RET
+	
+_WSTATUS:
+	OR		A
+	RET
+
+_WBLOAD:
+	CALL	EVALTXTPARAM	; Evaluate text parameter
+	PUSH	HL
+    CALL    GETSTRPNT
+.LOOP
+    LD      A,(HL)
+    CALL    CHPUT  ;Print
+    INC     HL
+    DJNZ    .LOOP
+	POP	HL
+	OR      A
+	RET
+
+_WLOAD:
+	CALL	EVALTXTPARAM	; Evaluate text parameter
+	PUSH	HL
+    CALL    GETSTRPNT
+.LOOP
+    LD      A,(HL)
+    CALL    CHPUT  ;Print
+    INC     HL
+    DJNZ    .LOOP
+	POP	HL
+	OR      A
+	RET
+
+	
 ;---------------------------
 
 GETSTRPNT:
