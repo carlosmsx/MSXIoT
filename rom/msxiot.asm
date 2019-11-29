@@ -72,7 +72,7 @@ CMDS:
 
 	DEFB	"WLIST",0      ; 
 	DEFW	_WLIST
-DEFB	"WCLIST",0      ; 
+	DEFB	"WCLIST",0      ; 
 	DEFW	_WCLIST
 
 	DEFB	"TEST",0      ; 
