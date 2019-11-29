@@ -1,1 +1,0 @@
-..\sjasm\sjasmplus -c msxiot.asm
