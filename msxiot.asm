@@ -72,6 +72,9 @@ CMDS:
 
 	DEFB	"WLIST",0      ; 
 	DEFW	_WLIST
+
+	DEFB	"TEST",0      ; 
+	DEFW	_TEST
 	
 	DEFB	"WNET",0     ; 
 	DEFW	_WNET
@@ -83,38 +86,17 @@ _WLIST:
 	PUSH	HL
 	LD		A,#10
 	OUT		(CMDPORT),A
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
 .LOOP1
+	CALL	DEMORA
 	IN		A,(CMDPORT)
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
 	AND		#80
 	JR		NZ,.LOOP1
 .LOOP2
+	CALL	DEMORA
 	IN		A,(CMDPORT)
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
 	AND		#40
 	JR		Z,.END
+	CALL	DEMORA
 	IN		A,(DATPORT)
 	CALL	CHPUT
 	JR		.LOOP2
@@ -122,7 +104,29 @@ _WLIST:
 	POP		HL
 	OR      A
 	RET
+;---------------------------
+_TEST:
+	LD		B,5
+.LOOP
+	IN		A,(CMDPORT)
+	CALL	DEMORA
+	DJNZ	.LOOP
+	OR		A
+	RET
 	
+DEMORA:
+	PUSH	AF
+	LD		A,(#C000)
+.LOOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	DEC		A
+	JR		NZ,.LOOP
+	POP		AF
+	RET
 ;---------------------------
 _WNET:
 	CALL	EVALTXTPARAM	; Evaluate text parameter
