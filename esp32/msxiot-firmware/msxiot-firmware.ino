@@ -18,6 +18,9 @@ static volatile uint16_t st_idx;
 static volatile uint16_t st_size;
 static volatile uint8_t st_status;
 static volatile uint8_t st_cmd;
+static volatile uint16_t st_counter=0;
+static volatile uint16_t st_counter2=0;
+static volatile uint16_t st_counter3=0;
 char *st_buffer; //dynamically better
 
 DRAM_ATTR const byte dmap[] = DATA_PINS;
@@ -34,28 +37,22 @@ const char* password = "password";
 void IRAM_ATTR decoInt();
 void IRAM_ATTR decoInt_old();
 
-void Task1code( void * parameter) 
+void IRAM_ATTR Task1code( void * parameter) 
 {
   uint32_t ulNotificationValue;
   
-  const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 2000 );
+  //const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 60000 );
 
   while (true)
   {
     //waits for ISR notification
-    ulNotificationValue = ulTaskNotifyTake( pdTRUE, xMaxBlockTime );
-  
+    ulNotificationValue = ulTaskNotifyTake( pdTRUE, portMAX_DELAY  );
+    st_counter2++;  
     if( ulNotificationValue == 1 )
     {
         /* The transmission ended as expected. */
         decoInt_old();
     }
-    /*
-    else
-    {
-        // The call to ulTaskNotifyTake() timed out.
-    }
-    */
   }
 }
 
@@ -81,15 +78,18 @@ void setup() {
   String s = "MSX IoT 2019 corriendo en core "+String(xPortGetCoreID())+"\n";
   Serial.print(s);
 
+  /*
   xTaskCreatePinnedToCore(
       Task1code, 
       "Task1", 
-      10000,  
+      1000,  
       NULL,
       0,
       &xTaskToNotify,
       0);
-
+  */
+  xTaskCreate(Task1code, "decoInt", 1000, NULL, 10, &xTaskToNotify);
+  
    /*
   WiFi.begin(ssid, password);  
   while (WiFi.status() != WL_CONNECTED) {
@@ -143,18 +143,13 @@ void IRAM_ATTR receiveByte(int A0)
 
 uint8_t IRAM_ATTR writeData()
 {
-  Serial.println("\nwrite st_cmd="+String(st_cmd)+" st_idx="+String(st_idx)+" st_status="+String(st_status)+" st_size="+String(st_size));
+  //Serial.println("\nwrite st_cmd="+String(st_cmd)+" st_idx="+String(st_idx)+" st_status="+String(st_status)+" st_size="+String(st_size));
   if (st_status==0x40 && st_idx<st_size) //<sizeof(_buffer))
   {
     return st_buffer[st_idx++];
   }
   st_status=0;
   return 0;
-}
-
-uint8_t IRAM_ATTR writeStatus()
-{
-  return st_status;
 }
 
 void IRAM_ATTR dispatchByte(int A0)
@@ -166,7 +161,7 @@ void IRAM_ATTR dispatchByte(int A0)
   }
   else
   {
-    data=writeStatus();
+    data=st_status;
   }
   
   //for (int i=0; i<8; i++)
@@ -179,23 +174,25 @@ void IRAM_ATTR dispatchByte(int A0)
     bit=bit<<1; 
   }
 
-  delayMicroseconds(14);
+  delayMicroseconds(5);
 
   digitalWrite(PIN_WAIT_EN, HIGH);
-  while (digitalRead(PIN_WAIT_ST)==LOW);
+  //while (digitalRead(PIN_WAIT_ST)==LOW);
   //  digitalWrite(PIN_WAIT_EN, HIGH); 
 
-  delayMicroseconds(14);
+  //delayMicroseconds(5);
 
   for (int i=0; i<8; i++)
     pinMode(dmap[i], INPUT);
 
   digitalWrite(PIN_WAIT_EN, LOW); 
-  Serial.println("\ndispatch="+String(data)+" st_cmd="+String(st_cmd)+" st_idx="+String(st_idx)+" st_status="+String(st_status)+" st_size="+String(st_size));
+  //..Serial.println("\ndispatch="+String(data)+" st_cmd="+String(st_cmd)+" st_idx="+String(st_idx)+" st_status="+String(st_status)+" st_size="+String(st_size));
+  //Serial.write('.');
 }
 
 void IRAM_ATTR decoInt_old()
 {
+  st_counter3++;  
   int A0 = digitalRead(PIN_A0);
   int RD = digitalRead(PIN_RD);
   
@@ -207,13 +204,30 @@ void IRAM_ATTR decoInt_old()
 
 void IRAM_ATTR decoInt()
 {
+  st_counter++;  
   BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-  if (xTaskToNotify != NULL)
-    vTaskNotifyGiveFromISR( xTaskToNotify, &xHigherPriorityTaskWoken );
-  portYIELD_FROM_ISR(); // xHigherPriorityTaskWoken );
+  vTaskNotifyGiveFromISR( xTaskToNotify, &xHigherPriorityTaskWoken );
+  if (xHigherPriorityTaskWoken) 
+    portYIELD_FROM_ISR( );
 }
 
+uint16_t ant=0, ant2=0, ant3=0;
 void loop() {
+  if (ant!=st_counter)
+  {
+    Serial.println("1:"+String(st_counter));
+    ant=st_counter;
+  }
+  if (ant2!=st_counter2)
+  {
+    Serial.println(" 2:"+String(st_counter2));
+    ant2=st_counter2;
+  }
+  if (ant3!=st_counter3)
+  {
+    Serial.println("  3:"+String(st_counter3));
+    ant3=st_counter3;
+  }
   if (Serial.available()>0)
   {
     String s=Serial.readString();
