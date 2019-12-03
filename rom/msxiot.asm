@@ -17,6 +17,17 @@ PROCNM	EQU		#FD89
 CMDPORT	EQU		1
 DATPORT	EQU		0
 
+CMD_SENDSTR	EQU	#01
+CMD_WLIST	EQU	#10
+CMD_WCLIST	EQU	#11
+CMD_WNET	EQU	#12
+CMD_WPASS	EQU	#13
+CMD_WCONN	EQU	#14
+CMD_WDISCON	EQU	#15
+CMD_WSTAT	EQU	#16
+CMD_WLOAD	EQU	#17
+CMD_WBLOAD	EQU	#18
+
 ;---------------------------
 ; ROM Header
 
@@ -70,71 +81,84 @@ CMDS:
 
 ; List of available commands (as ASCIIZ) and execute address (as word)
 
-	DEFB	"WLIST",0      ; 
+	DEFB	"WLIST",0
 	DEFW	_WLIST
-	DEFB	"WCLIST",0      ; 
+	DEFB	"WCLIST",0
 	DEFW	_WCLIST
-
-	DEFB	"TEST",0      ; 
-	DEFW	_TEST
-	
-	DEFB	"WNET",0     ; 
+	DEFB	"WNET",0
 	DEFW	_WNET
-	DEFB	"WPASS",0     ; 
+	DEFB	"WPASS",0
 	DEFW	_WPASS
-	DEFB	"WCONNECT",0     ; 
+	DEFB	"WCONNECT",0
 	DEFW	_WCONNECT
-	DEFB	"WDISCONNECT",0     ; 
+	DEFB	"WDISCONNECT",0
 	DEFW	_WDISCONNECT
-	DEFB	"WSTATUS",0     ; 
+	DEFB	"WSTATUS",0
 	DEFW	_WSTATUS
-	DEFB	"WBLOAD",0     ; 
+	DEFB	"WBLOAD",0
 	DEFW	_WBLOAD
-	DEFB	"WLOAD",0     ; 
+	DEFB	"WLOAD",0
 	DEFW	_WLOAD
 	DEFB	0               ; No more commands
 
+;---------------------------------
+_WCONNECT:
+	LD		A,CMD_WCONN
+	JR		GETLOG
+;---------------------------------
+_WDISCONNECT:
+	LD		A,CMD_WDISCON
+	JR		GETLOG
+;---------------------------------
+_WSTATUS:
+	LD		A,CMD_WSTAT
+	JR		GETLOG
 ;---------------------------
 _WCLIST:
-	PUSH	HL
-	LD		A,#11
-	JR		WLIST
+	LD		A,CMD_WCLIST
+	JR		GETLOG
+;---------------------------
 _WLIST:
+	LD		A,CMD_WLIST
+
+GETLOG:
 	PUSH	HL
-	LD		A,#10
-WLIST:
 	OUT		(CMDPORT),A
-.LOOP1
 	CALL	DEMORA
+.LOOP1
 	IN		A,(CMDPORT)
+	CALL	DEMORA
 	AND		#80
 	JR		NZ,.LOOP1
 .LOOP2
-	CALL	DEMORA
 	IN		A,(CMDPORT)
+	CALL	DEMORA
 	AND		#40
 	JR		Z,.END
-	CALL	DEMORA
 	IN		A,(DATPORT)
+	CALL	DEMORA
 	CALL	CHPUT
 	JR		.LOOP2
 .END	
 	POP		HL
 	OR      A
 	RET
-;---------------------------
-_TEST:
-	LD		B,5
-.LOOP
-	IN		A,(CMDPORT)
+	
+SENDSTR:
+	LD		A,CMD_SENDSTR
+	OUT		(CMDPORT),A
 	CALL	DEMORA
+.LOOP
+	LD		A,(HL)
+	OUT		(DATPORT),A
+	CALL	DEMORA
+	INC		HL
 	DJNZ	.LOOP
-	OR		A
 	RET
 	
 DEMORA:
 	PUSH	AF
-	LD		A,(#C000)
+	LD		A,10
 .LOOP
 	NOP
 	NOP
@@ -145,74 +169,37 @@ DEMORA:
 	JR		NZ,.LOOP
 	POP		AF
 	RET
+
+;---------------------------------
+_WPASS:
+	LD		A,CMD_WPASS
+	JR		_STRCMD
+;---------------------------------
+_WBLOAD:
+	LD		A,CMD_WBLOAD
+	JR		_STRCMD
+;---------------------------------
+_WLOAD:
+	LD		A,CMD_WLOAD
+	JR		_STRCMD
 ;---------------------------
 _WNET:
+	LD		A,CMD_WNET
+
+_STRCMD:
+	PUSH	AF
 	CALL	EVALTXTPARAM	; Evaluate text parameter
 	PUSH	HL
     CALL    GETSTRPNT
-.LOOP
-    LD      A,(HL)
-    CALL    CHPUT  ;Print
-    INC     HL
-    DJNZ    .LOOP
-	POP	HL
+	CALL	SENDSTR
+	POP		HL
+	POP		AF
+	OUT		(CMDPORT),A
+	CALL	DEMORA
 	OR      A
 	RET
 
-_WPASS:
-	CALL	EVALTXTPARAM	; Evaluate text parameter
-	PUSH	HL
-    CALL    GETSTRPNT
-.LOOP
-    LD      A,(HL)
-    CALL    CHPUT  ;Print
-    INC     HL
-    DJNZ    .LOOP
-	POP	HL
-	OR      A
-    RET
-
-_WCONNECT:
-	OR		A
-	RET
-	
-_WDISCONNECT:
-	OR		A
-	RET
-	
-_WSTATUS:
-	OR		A
-	RET
-
-_WBLOAD:
-	CALL	EVALTXTPARAM	; Evaluate text parameter
-	PUSH	HL
-    CALL    GETSTRPNT
-.LOOP
-    LD      A,(HL)
-    CALL    CHPUT  ;Print
-    INC     HL
-    DJNZ    .LOOP
-	POP	HL
-	OR      A
-	RET
-
-_WLOAD:
-	CALL	EVALTXTPARAM	; Evaluate text parameter
-	PUSH	HL
-    CALL    GETSTRPNT
-.LOOP
-    LD      A,(HL)
-    CALL    CHPUT  ;Print
-    INC     HL
-    DJNZ    .LOOP
-	POP	HL
-	OR      A
-	RET
-
-	
 ;---------------------------
-
 GETSTRPNT:
 ; OUT:
 ; HL = String Address
