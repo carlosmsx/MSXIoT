@@ -12,6 +12,17 @@
 #define PIN_A0 33
 #define DATA_PINS {15,16,17,18,19,21,22,23} 
 
+#define CMD_SENDSTR 0x01
+#define CMD_WLIST 0x10
+#define CMD_WCLIST 0x11
+#define CMD_WNET 0x12
+#define CMD_WPASS 0x13
+#define CMD_WCONN 0x14
+#define CMD_WDISCON 0x15
+#define CMD_WSTAT 0x16
+#define CMD_WLOAD 0x17
+#define CMD_WBLOAD 0x18
+
 static volatile uint16_t st_idx;
 static volatile uint16_t st_size;
 static volatile uint8_t st_status;
@@ -29,8 +40,8 @@ static TaskHandle_t xTaskToNotify = NULL;
 
 BluetoothSerial ESP_BT; //Object for Bluetooth
 
-/*const*/ char* ssid = "ssid";
-/*const*/ char* password = "password";
+char ssid[32];
+char password[32];
 
 void IRAM_ATTR decoInt();
 void IRAM_ATTR decoInt_old();
@@ -103,27 +114,21 @@ void IRAM_ATTR readCommand(uint8_t cmd)
     return;
 
   switch(cmd){
-    case 0x1:
+    case CMD_SENDSTR:
       st_idx = 0;
       st_size=0;
       st_status = 0x40;
       st_cmd = cmd;
       break;
-    case 0x10:
-      st_status = 0x80;
-      st_cmd = cmd;
-      break;
-    case 0x11:
-    case 0x14:
-    case 0x15:
-    case 0x16:
-      st_status = 0x80;
-      st_cmd = cmd;
-      break;
-    case 0x12: //wnet
-    case 0x13: //wpass
-    case 0x17: //wload
-    case 0x18: //wbload
+    case CMD_WLIST:
+    case CMD_WCLIST:
+    case CMD_WCONN:
+    case CMD_WDISCON:
+    case CMD_WSTAT:
+    case CMD_WNET: 
+    case CMD_WPASS:
+    case CMD_WLOAD:
+    case CMD_WBLOAD:
       st_status = 0x80;
       st_cmd = cmd;
       break;
@@ -242,8 +247,8 @@ void loop() {
   }
   switch(st_cmd)
   {
-    case 0x10:
-    case 0x11:
+    case CMD_WLIST:
+    case CMD_WCLIST:
       {
         Serial.println("procesando comando "+String(st_cmd, HEX));
         int numSsid = WiFi.scanNetworks();
@@ -254,7 +259,7 @@ void loop() {
         {
           st_size=0;
           for (int thisNet = 0; thisNet < numSsid; thisNet++) {
-            if (st_cmd==0x11) 
+            if (st_cmd==CMD_WCLIST) 
               st_size += sprintf(&st_buffer[st_size], "_WNET(\"%s\")\r\n", WiFi.SSID(thisNet).c_str());
             else
               st_size += sprintf(&st_buffer[st_size], "%s\r\n", WiFi.SSID(thisNet).c_str());
@@ -266,39 +271,76 @@ void loop() {
         st_status = 0x40;
       }
       break;
-    case 0x14:
-    case 0x15:
-    case 0x16:
+    case CMD_WCONN:
       {
-        st_size = sprintf(st_buffer, "procesando comando %02x\r\n", st_cmd);
+        Serial.println("procesando comando "+String(st_cmd, HEX));
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(ssid, password);
+       
+        uint8_t i = 0;
+        while (WiFi.status() != WL_CONNECTED)
+        {
+          Serial.print('.');
+          delay(500);
+       
+          if ((++i % 16) == 0)
+          {
+            Serial.println(F(" still trying to connect"));
+          }
+        }
+        st_size = sprintf(st_buffer, "Connected to \"%s\"\r\nIP: %s\r\n", ssid, WiFi.localIP().toString().c_str());
         Serial.write((uint8_t*)st_buffer, st_size);
         st_cmd = 0;
         st_idx = 0;
         st_status = 0x40;
       }
       break;
-    case 0x12:
-      Serial.print("ssid=");
-      for (int i=0; i<st_size; i++)
-        Serial.print(String(st_buffer[i]));
+    case CMD_WDISCON:
+      {
+        WiFi.disconnect();
+        st_size = sprintf(st_buffer, "disconnected\r\n");
+        Serial.write((uint8_t*)st_buffer, st_size);
+        st_cmd = 0;
+        st_idx = 0;
+        st_status = 0x40;
+      }
+      break;
+    case CMD_WSTAT:
+      {
+        if (WiFi.status()==WL_CONNECTED)
+          st_size = sprintf(st_buffer, "Connected to \"%s\"\r\nIP: %s\r\n", ssid, WiFi.localIP().toString().c_str());
+        else
+          st_size = sprintf(st_buffer, "Not connected\r\n");
+        Serial.write((uint8_t*)st_buffer, st_size);
+        st_cmd = 0;
+        st_idx = 0;
+        st_status = 0x40;
+      }
+      break;
+    case CMD_WNET:
+      for (st_idx=0; st_idx<st_size && st_idx<sizeof(ssid)-1; st_idx++)
+        ssid[st_idx] = st_buffer[st_idx];
+      ssid[st_idx]='\0';
+      Serial.println("ssid="+String(ssid));
       st_cmd = 0;
       st_status=0;
       break;    
-    case 0x13:
-      Serial.print("pass=");
-      for (int i=0; i<st_size; i++)
-        Serial.print(String(st_buffer[i]));
+    case CMD_WPASS:
+      for (st_idx=0; st_idx<st_size && st_idx<sizeof(password)-1; st_idx++)
+        password[st_idx] = st_buffer[st_idx];
+      password[st_idx]='\0';
+      Serial.println("password="+String(password));
       st_cmd = 0;
       st_status=0;
       break;    
-    case 0x17:
+    case CMD_WLOAD:
       Serial.print("load=");
       for (int i=0; i<st_size; i++)
         Serial.print(String(st_buffer[i]));
       st_cmd = 0;
       st_status=0;
       break;    
-    case 0x18:
+    case CMD_WBLOAD:
       Serial.print("bload=");
       for (int i=0; i<st_size; i++)
         Serial.print(String(st_buffer[i]));
