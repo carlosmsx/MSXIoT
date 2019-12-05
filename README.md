@@ -8,12 +8,12 @@ Te presento MSX IoT.
 
 Es un cartucho para MSX que permite IoT y algunos extras muy interesantes:
 
--Conectarse a redes WiFi
--Conectarse a dispositivos BT
--Conectarse a dispositivos seriales (TTL)
--Audio
--Disco en la nube
--Unidades de red
+*Conectarse a redes WiFi
+*Conectarse a dispositivos BT
+*Conectarse a dispositivos seriales (TTL)
+*Audio
+*Disco en la nube
+*Unidades de red
 
 Una vez conectado a una red WiFi, las posibilidades son muchas. Por ejemplo, es posible comandar dispositivos a través de internet, o bien saber el estado de los mismos.
 
