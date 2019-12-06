@@ -22,6 +22,8 @@
 #define CMD_WSTAT 0x16
 #define CMD_WLOAD 0x17
 #define CMD_WBLOAD 0x18
+#define CMD_TCPSVR 0x19
+#define CMD_TCPSEND 0x1A
 
 static volatile uint16_t st_idx;
 static volatile uint16_t st_size;
@@ -31,6 +33,10 @@ static volatile uint8_t st_cmd;
 //static volatile uint16_t st_counter2=0;
 //static volatile uint16_t st_counter3=0;
 char *st_buffer; //dynamically better
+char st_ssid[32];
+char st_password[32];
+char st_server[64];
+static volatile uint16_t st_server_port;
 
 DRAM_ATTR const byte dmap[] = DATA_PINS;
 
@@ -39,9 +45,6 @@ transmission is complete. */
 static TaskHandle_t xTaskToNotify = NULL;
 
 BluetoothSerial ESP_BT; //Object for Bluetooth
-
-char ssid[32];
-char password[32];
 
 void IRAM_ATTR decoInt();
 void IRAM_ATTR decoInt_old();
@@ -129,6 +132,8 @@ void IRAM_ATTR readCommand(uint8_t cmd)
     case CMD_WPASS:
     case CMD_WLOAD:
     case CMD_WBLOAD:
+    case CMD_TCPSVR:
+    case CMD_TCPSEND:
       st_status = 0x80;
       st_cmd = cmd;
       break;
@@ -275,7 +280,7 @@ void loop() {
       {
         Serial.println("procesando comando "+String(st_cmd, HEX));
         WiFi.mode(WIFI_STA);
-        WiFi.begin(ssid, password);
+        WiFi.begin(st_ssid, st_password);
        
         uint8_t i = 0;
         while (WiFi.status() != WL_CONNECTED)
@@ -288,7 +293,7 @@ void loop() {
             Serial.println(F(" still trying to connect"));
           }
         }
-        st_size = sprintf(st_buffer, "Connected to \"%s\"\r\nIP: %s\r\n", ssid, WiFi.localIP().toString().c_str());
+        st_size = sprintf(st_buffer, "Connected to \"%s\"\r\nIP: %s\r\n", st_ssid, WiFi.localIP().toString().c_str());
         Serial.write((uint8_t*)st_buffer, st_size);
         st_cmd = 0;
         st_idx = 0;
@@ -308,7 +313,7 @@ void loop() {
     case CMD_WSTAT:
       {
         if (WiFi.status()==WL_CONNECTED)
-          st_size = sprintf(st_buffer, "Connected to \"%s\"\r\nIP: %s\r\n", ssid, WiFi.localIP().toString().c_str());
+          st_size = sprintf(st_buffer, "Connected to \"%s\"\r\nIP: %s\r\n", st_ssid, WiFi.localIP().toString().c_str());
         else
           st_size = sprintf(st_buffer, "Not connected\r\n");
         Serial.write((uint8_t*)st_buffer, st_size);
@@ -318,18 +323,18 @@ void loop() {
       }
       break;
     case CMD_WNET:
-      for (st_idx=0; st_idx<st_size && st_idx<sizeof(ssid)-1; st_idx++)
-        ssid[st_idx] = st_buffer[st_idx];
-      ssid[st_idx]='\0';
-      Serial.println("ssid="+String(ssid));
+      for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_ssid)-1; st_idx++)
+        st_ssid[st_idx] = st_buffer[st_idx];
+      st_ssid[st_idx]='\0';
+      Serial.println("ssid="+String(st_ssid));
       st_cmd = 0;
       st_status=0;
       break;    
     case CMD_WPASS:
-      for (st_idx=0; st_idx<st_size && st_idx<sizeof(password)-1; st_idx++)
-        password[st_idx] = st_buffer[st_idx];
-      password[st_idx]='\0';
-      Serial.println("password="+String(password));
+      for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_password)-1; st_idx++)
+        st_password[st_idx] = st_buffer[st_idx];
+      st_password[st_idx]='\0';
+      Serial.println("password="+String(st_password));
       st_cmd = 0;
       st_status=0;
       break;    
@@ -346,6 +351,30 @@ void loop() {
         Serial.print(String(st_buffer[i]));
       st_cmd = 0;
       st_status=0;
+      break;    
+    case CMD_TCPSVR:
+      st_buffer[st_size]='\0';
+      strcpy(st_server, strtok(st_buffer, ":\0"));
+      st_server_port=atoi(strtok(NULL, "\0"));
+      Serial.println("server="+String(st_server)+":"+String(st_server_port));
+      st_cmd = 0;
+      st_status=0;
+      break;    
+    case CMD_TCPSEND:
+      {
+        WiFiClient client;
+        if (client.connect(st_server, st_server_port)) {
+          client.write(st_buffer, st_size);
+          st_size = sprintf(st_buffer, "Sent Ok\r\n");
+        }
+        else
+        {
+          st_size = sprintf(st_buffer, "ERROR\r\n");
+        }
+        st_cmd = 0;
+        st_idx = 0;
+        st_status = 0x40;
+      }
       break;    
   }
 }

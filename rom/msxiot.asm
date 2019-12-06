@@ -27,6 +27,8 @@ CMD_WDISCON	EQU	#15
 CMD_WSTAT	EQU	#16
 CMD_WLOAD	EQU	#17
 CMD_WBLOAD	EQU	#18
+CMD_TCPSVR	EQU	#19
+CMD_TCPSEND	EQU	#1A
 
 ;---------------------------
 ; ROM Header
@@ -99,6 +101,10 @@ CMDS:
 	DEFW	_WBLOAD
 	DEFB	"WLOAD",0
 	DEFW	_WLOAD
+	DEFB	"TCPSVR",0
+	DEFW	_TCPSVR
+	DEFB	"TCPSEND",0
+	DEFW	_TCPSEND
 	DEFB	0               ; No more commands
 
 ;---------------------------------
@@ -171,6 +177,15 @@ DEMORA:
 	RET
 
 ;---------------------------------
+_TCPSEND:
+	LD		A,CMD_TCPSEND
+	CALL	_STRCMD
+	JP		GETLOG
+;---------------------------------
+_TCPSVR:
+	LD		A,CMD_TCPSVR
+	JR		_STRCMD
+;---------------------------------
 _WPASS:
 	LD		A,CMD_WPASS
 	JR		_STRCMD
@@ -217,7 +232,7 @@ GETSTRPNT:
 EVALTXTPARAM:
 	CALL	CHKCHAR
 	DEFB	"("             ; Check for (
-	LD	IX,FRMEVL
+	LD		IX,FRMEVL
 	CALL	CALBAS		; Evaluate expression
 	LD      A,(VALTYP)
 	CP      3               ; Text type?
@@ -229,16 +244,16 @@ EVALTXTPARAM:
 
 CHKCHAR:
 	CALL	GETPREVCHAR	; Get previous basic char
-	EX	(SP),HL
-	CP	(HL) 	        ; Check if good char
-	JR	NZ,SYNTAX_ERROR	; No, Syntax error
-	INC	HL
-	EX	(SP),HL
-	INC	HL		; Get next basic char
+	EX		(SP),HL
+	CP		(HL) 	        ; Check if good char
+	JR		NZ,SYNTAX_ERROR	; No, Syntax error
+	INC		HL
+	EX		(SP),HL
+	INC		HL		; Get next basic char
 
 GETPREVCHAR:
-	DEC	HL
-	LD	IX,CHRGTR
+	DEC		HL
+	LD		IX,CHRGTR
 	JP      CALBAS
 
 
@@ -248,8 +263,8 @@ TYPE_MISMATCH:
 
 SYNTAX_ERROR:
 	LD      E,2
-	LD	IX,ERRHAND	; Call the Basic error handler
-	JP	CALBAS
+	LD		IX,ERRHAND	; Call the Basic error handler
+	JP		CALBAS
 	
 ;---------------------------
 
