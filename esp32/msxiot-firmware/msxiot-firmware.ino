@@ -5,6 +5,7 @@
 #include "BluetoothSerial.h" 
 #include <WiFi.h>
 #include <string.h>
+#include "SPIFFS.h"
 
 #define PIN_WAIT_EN 32
 #define PIN_WAIT_ST 13
@@ -25,6 +26,11 @@
 #define CMD_TCPSVR 0x19
 #define CMD_TCPSEND 0x1A
 
+#define CMD_FNAME 0x60
+#define CMD_FSAVE 0x61
+#define CMD_FLOAD 0x62
+#define CMD_FFILES 0x63
+
 static volatile uint16_t st_idx;
 static volatile uint16_t st_size;
 static volatile uint8_t st_status;
@@ -36,6 +42,7 @@ char *st_buffer; //dynamically better
 char st_ssid[32];
 char st_password[32];
 char st_server[64];
+char st_file_name[64];
 static volatile uint16_t st_server_port;
 
 DRAM_ATTR const byte dmap[] = DATA_PINS;
@@ -67,8 +74,24 @@ void IRAM_ATTR TaskISR( void * parameter)
 }
 
 void setup() {
-  st_buffer = new char[8192];
   Serial.begin(115200);
+  if (!SPIFFS.begin(true)) {
+    Serial.println("An Error has occurred while mounting SPIFFS");
+    return;
+  }
+ 
+  File root = SPIFFS.open("/");
+ 
+  File file = root.openNextFile();
+ 
+  while(file){
+      Serial.print("FILE: ");
+      Serial.println(file.name());
+      file = root.openNextFile();
+  }
+  file.close();
+  
+  st_buffer = new char[8192];
 
   ESP_BT.begin("MSX-IoT BT"); //Name of your Bluetooth Signal
   
@@ -134,6 +157,10 @@ void IRAM_ATTR readCommand(uint8_t cmd)
     case CMD_WBLOAD:
     case CMD_TCPSVR:
     case CMD_TCPSEND:
+    case CMD_FSAVE:
+    case CMD_FLOAD:
+    case CMD_FFILES:
+    case CMD_FNAME:
       st_status = 0x80;
       st_cmd = cmd;
       break;
@@ -248,7 +275,22 @@ void loop() {
   if (Serial.available()>0)
   {
     String s=Serial.readString();
-    st_status=(byte)atoi(s.c_str());
+    if (s=="dump")
+    {
+      for (uint16_t i=0; i<st_size; i++)
+      {
+        String s_hexa="";
+        String s="";
+        for(int j=0; j<32; j++, i++)
+        {
+          s_hexa=s_hexa+String(st_buffer[i],HEX)+" ";
+          s=s+(st_buffer[i]>=32 && st_buffer[i]<128?String(st_buffer[i]):".");
+        }
+        Serial.println(s_hexa+s);    
+      }
+    }
+    else
+      st_status=(byte)atoi(s.c_str());
   }
   switch(st_cmd)
   {
@@ -375,6 +417,69 @@ void loop() {
         st_idx = 0;
         st_status = 0x40;
       }
+      break;
+    case CMD_FNAME:
+      for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_file_name)-1; st_idx++)
+        st_file_name[st_idx] = st_buffer[st_idx];
+      st_file_name[st_idx]='\0';
+      Serial.println("st_file_name="+String(st_file_name));
+      st_cmd = 0;
+      st_status=0;
       break;    
+    case CMD_FSAVE:
+      {
+        Serial.println("FSAVE st_file_name="+String(st_file_name));
+        String fname = "/"+String(st_file_name);
+        File f = SPIFFS.open(fname.c_str(), "w");
+        if (f) {
+          f.write((uint8_t*)st_buffer, st_size);
+          f.close();
+        }
+        st_cmd = 0;
+        st_status=0;
+      }
+      break;    
+    case CMD_FLOAD:
+      {
+        for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_file_name)-1; st_idx++)
+          st_file_name[st_idx] = st_buffer[st_idx];
+        st_file_name[st_idx]='\0';
+        Serial.println("FLOAD st_file_name="+String(st_file_name));
+        String fname = "/"+String(st_file_name);
+        File f = SPIFFS.open(fname.c_str(), "r");
+        if (f) {
+          st_size=f.size()+2;
+          st_buffer[0]=(uint8_t)(st_size & 0xff);
+          st_buffer[1]=(uint8_t)(st_size >> 8);
+          Serial.println(String(f.size()));
+          Serial.println(String(st_size));
+          Serial.println(String((int)st_buffer[0]));
+          Serial.println(String((int)st_buffer[1]));
+          f.read((uint8_t*)(st_buffer+2), f.size());
+          f.close();
+        }
+        st_idx=0;
+        st_cmd = 0;
+        st_status=0x40;
+      }
+      break;    
+    case CMD_FFILES:
+      {
+        File root = SPIFFS.open("/");
+        File file = root.openNextFile();
+        st_size=0;
+       
+        while(file){
+          st_size += sprintf(&st_buffer[st_size], "%s\r\n", file.name());
+          file = root.openNextFile();
+        }
+        file.close();
+
+        Serial.write((uint8_t*)st_buffer, st_size);
+        st_cmd = 0;
+        st_idx = 0;
+        st_status = 0x40;
+      }
+      break;
   }
 }

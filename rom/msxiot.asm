@@ -1,4 +1,4 @@
-;Author: Carlos Escobar
+;Author: Carlos Escobar 2019 Dec
 ;ROM para el cartucho MSX-IoT
 
         OUTPUT "MSXIOT.ROM"
@@ -29,6 +29,10 @@ CMD_WLOAD	EQU	#17
 CMD_WBLOAD	EQU	#18
 CMD_TCPSVR	EQU	#19
 CMD_TCPSEND	EQU	#1A
+CMD_FNAME	EQU	#60
+CMD_FSAVE	EQU	#61
+CMD_FLOAD	EQU #62
+CMD_FFILES	EQU #63
 
 ;---------------------------
 ; ROM Header
@@ -83,6 +87,12 @@ CMDS:
 
 ; List of available commands (as ASCIIZ) and execute address (as word)
 
+	DEFB	"FFILES",0
+	DEFW	_FFILES
+	DEFB	"FSAVE",0
+	DEFW	_FSAVE
+	DEFB	"FLOAD",0
+	DEFW	_FLOAD
 	DEFB	"WLIST",0
 	DEFW	_WLIST
 	DEFB	"WCLIST",0
@@ -107,6 +117,10 @@ CMDS:
 	DEFW	_TCPSEND
 	DEFB	0               ; No more commands
 
+;---------------------------------
+_FFILES:
+	LD		A,CMD_FFILES
+	JR		GETLOG
 ;---------------------------------
 _WCONNECT:
 	LD		A,CMD_WCONN
@@ -148,6 +162,74 @@ GETLOG:
 .END	
 	POP		HL
 	OR      A
+	RET
+
+_FSAVE:
+	LD		A,CMD_FNAME
+	CALL	_STRCMD
+	PUSH	HL
+	LD		HL,#8000
+	LD		A,CMD_SENDSTR
+	OUT		(CMDPORT),A		;envio cadena larga
+	CALL	DEMORA
+	LD		BC,(#F6C2)
+	RES		7,B
+	;LD		A,C
+	;OUT		(DATPORT),A
+	;CALL	DEMORA
+	;LD		A,B
+	;OUT		(DATPORT),A
+	;CALL	DEMORA
+.LOOP
+	LD		A,(HL)
+	OUT		(DATPORT),A
+	CALL	DEMORA
+	INC		HL
+	DEC		BC
+	LD		A,B
+	OR		C
+	JR		NZ,.LOOP
+
+	LD		A,CMD_FSAVE
+	OUT		(CMDPORT),A		;
+	CALL	DEMORA
+	
+	POP		HL
+	OR		A
+	RET
+
+_FLOAD:
+	LD		A,CMD_FLOAD
+	CALL	_STRCMD
+	PUSH	HL
+
+.LOOP1
+	IN		A,(CMDPORT)
+	CALL	DEMORA
+	AND		#80
+	JR		NZ,.LOOP1
+
+	IN		A,(DATPORT)
+	LD		C,A
+	CALL	DEMORA
+	IN		A,(DATPORT)
+	LD		B,A
+	SET		7,B
+	LD		(#F6C2),BC
+	LD		B,A
+	CALL	DEMORA
+	LD		HL,#8000
+.LOOP
+	IN		A,(DATPORT)
+	LD		(HL),A
+	CALL	DEMORA
+	INC		HL
+	DEC		BC
+	LD		A,B
+	OR		C
+	JR		NZ,.LOOP
+	POP		HL
+	OR		A
 	RET
 	
 SENDSTR:
