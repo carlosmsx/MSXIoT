@@ -14,8 +14,13 @@ CHRGTR  EQU     #4666
 VALTYP  EQU     #F663
 USR     EQU     #F7F8
 PROCNM	EQU		#FD89
-CMDPORT	EQU		1
-DATPORT	EQU		0
+ENASLT  EQU     0024H           ;enable slot
+RSLREG  EQU     0138H           ;read primary slot select register
+RSLGREG EQU	0138H
+BOTTOM	EQU	0FC48H
+HIMEM	EQU	0FC4AH
+SLTWRK	EQU	0FD09H
+EXPTBL  EQU     0FCC1H          ;slot is expanded or not
 
 CMD_SENDSTR	EQU	#01
 CMD_WLIST	EQU	#10
@@ -34,12 +39,211 @@ CMD_FSAVE	EQU	#61
 CMD_FLOAD	EQU #62
 CMD_FFILES	EQU #63
 
+CMDPORT	EQU		1
+DATPORT	EQU		0
+_TIMEOUT	EQU	#ffff
 ;---------------------------
 ; ROM Header
 
-        DEFW    #4241,0,HANDLER,0,0,0,0,0
+    DEFW    #4241,INIT,HANDLER,0,0,0,0,0
 
 ;---------------------------
+;********************************************************
+;  List 5.13  subroutines to support slot
+;	       for ROM in 1 page
+;********************************************************
+
+
+;--------------------------------------------------------
+;
+;	GTSL1	Get slot number of designated page
+;	Entry	None
+;	Return	A	Slot address as follows
+;	Modify	Flags
+;
+;	    FxxxSSPP
+;	    |	||||
+;	    |	||++-- primary slot # (0-3)
+;	    |	++---- secondary slot # (0-3)
+;	    |	       00 if not expanded
+;	    +--------- 1 if secondary slot # specified
+;
+;	This value can later be used as an input parameter
+;	for the RDSLT, WRSLT, CALSLT, ENASLT and 'RST 10H'
+;
+	;PUBLIC	GTSL10
+GTSL10:
+	PUSH	HL		;Save registers
+	PUSH	DE
+
+	CALL	RSLREG		;read primary slot #
+	RRCA
+	RRCA
+	AND	11B		;[A]=000000PP
+	LD	E,A
+	LD	D,0		;[DE]=000000PP
+	LD	HL,EXPTBL
+	ADD	HL,DE		;[HL]=EXPTBL+000000PP
+	LD	E,A		;[E]=000000PP
+	LD	A,(HL)		;A=(EXPTBL+000000PP)
+	AND	80H		;Use only MSB
+	JR	Z,GTSL1NOEXP
+	OR	E		;[A]=F00000PP
+	LD	E,A		;save primary slot number
+	INC	HL		;point to SLTTBL entry
+	INC	HL
+	INC	HL
+	INC	HL
+	LD	A,(HL)		;get current expansion slot register
+	RRCA
+	RRCA
+	AND	11B		;[A] = 000000SS
+	RLCA
+	RLCA			;[A] = 0000SS00
+	OR	E		;[A] = F000SSPP
+;
+GTSL1END:
+	POP	DE
+	POP	HL
+	RET
+GTSL1NOEXP:
+	LD	A,E		;[A] = 000000PP
+	JR	GTSL1END
+
+
+;--------------------------------------------------------
+;
+;	ASLW1	Get address of slot work
+;	Entry	None
+;	Return	HL	address of slot work
+;	Modify	None
+;
+	;PUBLIC	ASLW10
+ASLW10:
+	PUSH	DE
+	PUSH	AF
+	CALL	GTSL10		;[A] = F000SSPP, SS = 00 if not expanded
+	AND	00001111B	;[A] = 0000SSPP
+	LD	L,A		;[A] = 0000SSPP
+	RLCA
+	RLCA
+	RLCA
+	RLCA			;[A] = SSPP0000
+	AND	00110000B	;[A] = 00PP0000
+	OR	L		;[A] = 00PPSSPP
+	AND	00111100B	;[A] = 00PPSS00
+	OR	01B		;[A] = 00PPSSBB
+;
+;	Now, we have the sequence number for this cartridge
+;	as follows.
+;
+;	00PPSSBB
+;	  ||||||
+;	  ||||++-- higher 2 bits of memory address (1)
+;	  ||++---- seconday slot # (0..3)
+;	  ++------ primary slot # (0..3)
+;
+	RLCA			;*=2
+	LD	E,A
+	LD	D,0		;[DE] = 0PPSSBB0
+	LD	HL,SLTWRK
+	ADD	HL,DE
+	POP	AF
+	POP	DE
+	RET
+
+
+;--------------------------------------------------------
+;
+;	RSLW1	Read slot work
+;	Entry	None
+;	Return	HL	Content of slot work
+;	Modify	None
+;
+	;PUBLIC	RSLW10
+RSLW10:
+	PUSH	DE
+	CALL	ASLW10		;[HL] = address of slot work
+	LD	E,(HL)
+	INC	HL
+	LD	D,(HL)		;[DE] = (slot work)
+	EX	DE,HL		;[HL] = (slot work)
+	POP	DE
+	RET
+
+
+;--------------------------------------------------------
+;
+;	WSLW1	Write slot work
+;	Entry	HL	Data to write
+;	Return	None
+;	Modify	None
+;
+	;PUBLIC	WSLW10
+WSLW10:
+	PUSH	DE
+	EX	DE,HL		;[DE] = data to write
+	CALL	ASLW10		;[HL] = address of slot work
+	LD	(HL),E
+	INC	HL
+	LD	(HL),D
+	EX	DE,HL		;[HL] = data tow write
+	POP	DE
+	RET
+
+
+;--------------------------------------------------------
+;
+; How to allocate work area for cartridges
+; If the work area is greater than 2 bytes, make the SLTWRK point
+; to the system variable BOTTOM (0FC48H), then update it by the
+; amount of memory required. BOTTOM is set up by the initizalization
+; code to point to the bottom of equipped RAM.
+;
+;	   Ex, if the program is at 4000H..7FFFH.
+;
+;	WORKB	allocate work area from BOTTOM
+;		(my slot work) <- (old BOTTOM)
+;	Entry	HL	required memory size
+;	Return	HL	start address of my work area = old BOTTOM
+;			0 if cannot allocate
+;	Modify	None
+;
+	;PUBLIC	WORKB0
+WORKB0:
+	PUSH	DE
+	PUSH	BC
+	PUSH	AF
+
+	EX	DE,HL		;[DE] = Size
+	LD	HL,(BOTTOM)	;Get current RAM bottom
+	CALL	WSLW10		;Save BOTTOM to slot work
+	PUSH	HL		;Save old BOTTOM
+	ADD	HL,DE		;[HL] = (BOTTOM) + SIZE
+	LD	A,H		;Beyond 0DFFFH?
+	CP	0E0H
+	JR	NC,NOROOM	;Yes, cannot allocate this much
+	LD	(BOTTOM),HL	;Updtae (BOTTOM)
+	POP	HL		;[HL] = old BOTTOM
+WORKBEND:
+	POP	AF
+	POP	BC
+	POP	DE
+	RET
+;
+;	BOTTOM became greater than 0DFFFH, there is
+;	no RAM to be allocated.
+;
+NOROOM:
+	LD	HL,0
+	CALL	WSLW10		;Clear slot work
+	JR	WORKBEND	;Return 0 in [HL]
+
+
+INIT:
+	LD	HL,8
+	CALL	WORKB0
+	RET
 
 ; BASIC CALL EXTENSION handler
 
@@ -143,13 +347,26 @@ _WLIST:
 
 GETLOG:
 	PUSH	HL
+	PUSH	BC
 	OUT		(CMDPORT),A
 	CALL	DEMORA
+	LD		BC,_TIMEOUT
 .LOOP1
 	IN		A,(CMDPORT)
 	CALL	DEMORA
 	AND		#80
-	JR		NZ,.LOOP1
+	;JR		NZ,.LOOP1
+	JR		Z,.LOOP2
+	DJNZ	.LOOP1
+.TIMEOUT
+	LD		HL,_TIMEOUTMSG
+.LOOP_T
+	LD		A,(HL)
+	OR		A
+	JR		Z,.END
+	CALL	CHPUT
+	INC		HL
+	JR		.LOOP_T
 .LOOP2
 	IN		A,(CMDPORT)
 	CALL	DEMORA
@@ -160,6 +377,7 @@ GETLOG:
 	CALL	CHPUT
 	JR		.LOOP2
 .END	
+	POP		BC
 	POP		HL
 	OR      A
 	RET
@@ -347,7 +565,13 @@ SYNTAX_ERROR:
 	LD      E,2
 	LD		IX,ERRHAND	; Call the Basic error handler
 	JP		CALBAS
+
+_TIMEOUTMSG:
+	DB		'Timeout',#13,#10,#0
 	
 ;---------------------------
 
 	DS      #8000-$
+	ORG		#8000
+	
+	DS      #0C000-$
