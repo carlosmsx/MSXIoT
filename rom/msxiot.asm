@@ -6,42 +6,44 @@
 
 ;---------------------------
 ; External variables & routines
-CHPUT   EQU     #A2
-CALBAS	EQU		#159
-ERRHAND EQU     #406F
-FRMEVL  EQU     #4C64
-CHRGTR  EQU     #4666
-VALTYP  EQU     #F663
-USR     EQU     #F7F8
-PROCNM	EQU		#FD89
-ENASLT  EQU     0024H           ;enable slot
-RSLREG  EQU     0138H           ;read primary slot select register
-RSLGREG EQU	0138H
-BOTTOM	EQU	0FC48H
-HIMEM	EQU	0FC4AH
-SLTWRK	EQU	0FD09H
-EXPTBL  EQU     0FCC1H          ;slot is expanded or not
+CHPUT   	EQU     #A2
+CALBAS		EQU		#159
+ERRHAND 	EQU     #406F
+FRMEVL  	EQU     #4C64
+CHRGTR  	EQU     #4666
+VALTYP  	EQU     #F663
+USR     	EQU     #F7F8
+PROCNM		EQU		#FD89
+ENASLT  	EQU     0024H           ;enable slot
+RSLREG  	EQU     0138H           ;read primary slot select register
+RSLGREG 	EQU		0138H
+BOTTOM		EQU		0FC48H
+HIMEM		EQU		0FC4AH
+SLTWRK		EQU		0FD09H
+EXPTBL  	EQU     0FCC1H          ;slot is expanded or not
+CALSLT		EQU		#001C
 
-CMD_SENDSTR	EQU	#01
-CMD_WLIST	EQU	#10
-CMD_WCLIST	EQU	#11
-CMD_WNET	EQU	#12
-CMD_WPASS	EQU	#13
-CMD_WCONN	EQU	#14
-CMD_WDISCON	EQU	#15
-CMD_WSTAT	EQU	#16
-CMD_WLOAD	EQU	#17
-CMD_WBLOAD	EQU	#18
-CMD_TCPSVR	EQU	#19
-CMD_TCPSEND	EQU	#1A
-CMD_FNAME	EQU	#60
-CMD_FSAVE	EQU	#61
-CMD_FLOAD	EQU #62
-CMD_FFILES	EQU #63
+CMD_SENDSTR	EQU		#01
+CMD_WLIST	EQU		#10
+CMD_WCLIST	EQU		#11
+CMD_WNET	EQU		#12
+CMD_WPASS	EQU		#13
+CMD_WCONN	EQU		#14
+CMD_WDISCON	EQU		#15
+CMD_WSTAT	EQU		#16
+CMD_WLOAD	EQU		#17
+CMD_WBLOAD	EQU		#18
+CMD_TCPSVR	EQU		#19
+CMD_TCPSEND	EQU		#1A
+CMD_FNAME	EQU		#60
+CMD_FSAVE	EQU		#61
+CMD_FLOAD	EQU 	#62
+CMD_FFILES	EQU 	#63
+CMD_FROM	EQU		#64
 
-CMDPORT	EQU		1
-DATPORT	EQU		0
-_TIMEOUT	EQU	#ffff
+CMDPORT		EQU		1
+DATPORT		EQU		0
+_TIMEOUT	EQU		#ffff
 ;---------------------------
 ; ROM Header
 
@@ -79,36 +81,36 @@ GTSL10:
 	CALL	RSLREG		;read primary slot #
 	RRCA
 	RRCA
-	AND	11B		;[A]=000000PP
-	LD	E,A
-	LD	D,0		;[DE]=000000PP
-	LD	HL,EXPTBL
-	ADD	HL,DE		;[HL]=EXPTBL+000000PP
-	LD	E,A		;[E]=000000PP
-	LD	A,(HL)		;A=(EXPTBL+000000PP)
-	AND	80H		;Use only MSB
-	JR	Z,GTSL1NOEXP
-	OR	E		;[A]=F00000PP
-	LD	E,A		;save primary slot number
-	INC	HL		;point to SLTTBL entry
-	INC	HL
-	INC	HL
-	INC	HL
-	LD	A,(HL)		;get current expansion slot register
+	AND		11B		;[A]=000000PP
+	LD		E,A
+	LD		D,0		;[DE]=000000PP
+	LD		HL,EXPTBL
+	ADD		HL,DE		;[HL]=EXPTBL+000000PP
+	LD		E,A		;[E]=000000PP
+	LD		A,(HL)		;A=(EXPTBL+000000PP)
+	AND		80H		;Use only MSB
+	JR		Z,.GTSL1NOEXP
+	OR		E		;[A]=F00000PP
+	LD		E,A		;save primary slot number
+	INC		HL		;point to SLTTBL entry
+	INC		HL
+	INC		HL
+	INC		HL
+	LD		A,(HL)		;get current expansion slot register
 	RRCA
 	RRCA
-	AND	11B		;[A] = 000000SS
+	AND		11B		;[A] = 000000SS
 	RLCA
 	RLCA			;[A] = 0000SS00
-	OR	E		;[A] = F000SSPP
+	OR		E		;[A] = F000SSPP
 ;
-GTSL1END:
+.GTSL1END:
 	POP	DE
 	POP	HL
 	RET
-GTSL1NOEXP:
+.GTSL1NOEXP:
 	LD	A,E		;[A] = 000000PP
-	JR	GTSL1END
+	JR	.GTSL1END
 
 
 ;--------------------------------------------------------
@@ -123,16 +125,16 @@ ASLW10:
 	PUSH	DE
 	PUSH	AF
 	CALL	GTSL10		;[A] = F000SSPP, SS = 00 if not expanded
-	AND	00001111B	;[A] = 0000SSPP
-	LD	L,A		;[A] = 0000SSPP
+	AND		00001111B	;[A] = 0000SSPP
+	LD		L,A		;[A] = 0000SSPP
 	RLCA
 	RLCA
 	RLCA
 	RLCA			;[A] = SSPP0000
-	AND	00110000B	;[A] = 00PP0000
-	OR	L		;[A] = 00PPSSPP
-	AND	00111100B	;[A] = 00PPSS00
-	OR	01B		;[A] = 00PPSSBB
+	AND		00110000B	;[A] = 00PP0000
+	OR		L		;[A] = 00PPSSPP
+	AND		00111100B	;[A] = 00PPSS00
+	OR		01B		;[A] = 00PPSSBB
 ;
 ;	Now, we have the sequence number for this cartridge
 ;	as follows.
@@ -144,12 +146,12 @@ ASLW10:
 ;	  ++------ primary slot # (0..3)
 ;
 	RLCA			;*=2
-	LD	E,A
-	LD	D,0		;[DE] = 0PPSSBB0
-	LD	HL,SLTWRK
-	ADD	HL,DE
-	POP	AF
-	POP	DE
+	LD		E,A
+	LD		D,0		;[DE] = 0PPSSBB0
+	LD		HL,SLTWRK
+	ADD		HL,DE
+	POP		AF
+	POP		DE
 	RET
 
 
@@ -164,11 +166,11 @@ ASLW10:
 RSLW10:
 	PUSH	DE
 	CALL	ASLW10		;[HL] = address of slot work
-	LD	E,(HL)
-	INC	HL
-	LD	D,(HL)		;[DE] = (slot work)
-	EX	DE,HL		;[HL] = (slot work)
-	POP	DE
+	LD		E,(HL)
+	INC		HL
+	LD		D,(HL)		;[DE] = (slot work)
+	EX		DE,HL		;[HL] = (slot work)
+	POP		DE
 	RET
 
 
@@ -182,13 +184,13 @@ RSLW10:
 	;PUBLIC	WSLW10
 WSLW10:
 	PUSH	DE
-	EX	DE,HL		;[DE] = data to write
+	EX		DE,HL		;[DE] = data to write
 	CALL	ASLW10		;[HL] = address of slot work
-	LD	(HL),E
-	INC	HL
-	LD	(HL),D
-	EX	DE,HL		;[HL] = data tow write
-	POP	DE
+	LD		(HL),E
+	INC		HL
+	LD		(HL),D
+	EX		DE,HL		;[HL] = data tow write
+	POP		DE
 	RET
 
 
@@ -215,33 +217,33 @@ WORKB0:
 	PUSH	BC
 	PUSH	AF
 
-	EX	DE,HL		;[DE] = Size
-	LD	HL,(BOTTOM)	;Get current RAM bottom
+	EX		DE,HL		;[DE] = Size
+	LD		HL,(BOTTOM)	;Get current RAM bottom
 	CALL	WSLW10		;Save BOTTOM to slot work
-	PUSH	HL		;Save old BOTTOM
-	ADD	HL,DE		;[HL] = (BOTTOM) + SIZE
-	LD	A,H		;Beyond 0DFFFH?
-	CP	0E0H
-	JR	NC,NOROOM	;Yes, cannot allocate this much
-	LD	(BOTTOM),HL	;Updtae (BOTTOM)
-	POP	HL		;[HL] = old BOTTOM
+	PUSH	HL			;Save old BOTTOM
+	ADD		HL,DE		;[HL] = (BOTTOM) + SIZE
+	LD		A,H			;Beyond 0DFFFH?
+	CP		0E0H
+	JR		NC,NOROOM	;Yes, cannot allocate this much
+	LD		(BOTTOM),HL	;Updtae (BOTTOM)
+	POP		HL			;[HL] = old BOTTOM
 WORKBEND:
-	POP	AF
-	POP	BC
-	POP	DE
+	POP		AF
+	POP		BC
+	POP		DE
 	RET
 ;
 ;	BOTTOM became greater than 0DFFFH, there is
 ;	no RAM to be allocated.
 ;
 NOROOM:
-	LD	HL,0
+	LD		HL,0
 	CALL	WSLW10		;Clear slot work
-	JR	WORKBEND	;Return 0 in [HL]
+	JR		WORKBEND	;Return 0 in [HL]
 
 
 INIT:
-	LD	HL,8
+	LD		HL,8
 	CALL	WORKB0
 	RET
 
@@ -271,14 +273,14 @@ HANDLER:
 	RET
 
 .TONEXTCMD:
-	LD	C,0FFH
-	XOR	A
+	LD		C,0FFH
+	XOR		A
 	CPIR			; Skip to end of command name
-	INC	HL
-	INC	HL			; Skip address
-	CP	(HL)
-	JR	NZ,.CHKCMD	; Not end of table, go checking
-	POP	HL
+	INC		HL
+	INC		HL			; Skip address
+	CP		(HL)
+	JR		NZ,.CHKCMD	; Not end of table, go checking
+	POP		HL
     SCF
 	RET
 	
@@ -319,8 +321,13 @@ CMDS:
 	DEFW	_TCPSVR
 	DEFB	"TCPSEND",0
 	DEFW	_TCPSEND
+	DEFB	"FROM",0
+	DEFW	_FROM
 	DEFB	0               ; No more commands
 
+_FROM:
+	LD		A,CMD_FROM
+	JP		MEMTEST
 ;---------------------------------
 _FFILES:
 	LD		A,CMD_FFILES
@@ -355,9 +362,9 @@ GETLOG:
 	IN		A,(CMDPORT)
 	CALL	DEMORA
 	AND		#80
-	;JR		NZ,.LOOP1
 	JR		Z,.LOOP2
-	DJNZ	.LOOP1
+	;DJNZ	.LOOP1
+	JR		.LOOP1
 .TIMEOUT
 	LD		HL,_TIMEOUTMSG
 .LOOP_T
@@ -569,9 +576,112 @@ SYNTAX_ERROR:
 _TIMEOUTMSG:
 	DB		'Timeout',#13,#10,#0
 	
+_MEMTESTMSG:
+	DB		' MemTest',#13,#10,#0
 ;---------------------------
+PRINTHEX:
+	PUSH	AF
+	PUSH	AF
+    CALL 	.Num1
+	CALL	CHPUT
+	POP		AF
+	CALL 	.Num2
+	CALL	CHPUT
+	POP		AF
+	RET  	; return with hex number in de
+.Num1        
+	RRA
+	RRA
+	RRA
+	RRA
+.Num2        
+	OR		#F0
+	DAA
+	ADD 	A,#A0
+	ADC 	A,#40 ; Ascii hex at this point (0 to F)   
+	RET	
+
+MEMTEST:
+	PUSH	HL
+	PUSH	BC
+	IN		A,(#A8)
+	CALL	PRINTHEX
+	CALL	GTSL10
+	PUSH	AF
+	CALL	PRINTHEX
+	LD		IX,MXFER
+	POP		IY
+	CALL	CALSLT
+	
+	LD		HL,_MEMTESTMSG
+.LOOP_T
+	LD		A,(HL)
+	OR		A
+	JR		Z,.END
+	CALL	CHPUT
+	INC		HL
+	JR		.LOOP_T
+.END	
+	POP		BC
+	POP		HL
+	OR      A
+	RET
+
 
 	DS      #8000-$
 	ORG		#8000
+_TIMEOUTMSG2:
+	DB		'Timeout(2)',#13,#10,#0
+MXFER:
+	LD		A,64
+	CALL	CHPUT
+	PUSH	HL
+	PUSH	BC
+	LD		A,CMD_FROM
+	OUT		(CMDPORT),A
+	CALL	DELAY2
+.LOOP1
+	IN		A,(CMDPORT)
+	CALL	DELAY2
+	AND		#80
+	JR		Z,.LOOP2
+	JR		.LOOP1
+;.TIMEOUT
+;	LD		HL,_TIMEOUTMSG2
+;.LOOP_T
+;	LD		A,(HL)
+;	OR		A
+;	JR		Z,.END
+;	CALL	CHPUT
+;	INC		HL
+;	JR		.LOOP_T
+.LOOP2
+	IN		A,(CMDPORT)
+	CALL	DELAY2
+	AND		#40
+	JR		Z,.END
+	IN		A,(DATPORT)
+	CALL	DELAY2
+	CALL	CHPUT
+	JR		.LOOP2
+.END	
+	POP		BC
+	POP		HL
+	OR      A
+	RET	
 	
+DELAY2:
+	PUSH	AF
+	LD		A,10
+.LOOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	DEC		A
+	JR		NZ,.LOOP
+	POP		AF
+	RET
+
 	DS      #0C000-$

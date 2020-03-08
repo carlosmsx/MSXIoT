@@ -1,6 +1,8 @@
 /*
  * MSX INTERFACE DECO+ESP32
  * Autor: Carlos Escobar
+ * 
+ * Placa: ESP32 Dev Module
  */
 #include "BluetoothSerial.h" 
 #include <WiFi.h>
@@ -13,6 +15,10 @@
 #define PIN_A0 33
 #define DATA_PINS {15,16,17,18,19,21,22,23} 
 
+//16384
+#define BUFSIZE 0x4000
+
+#define CMD_NULL 0x00
 #define CMD_SENDSTR 0x01
 #define CMD_WLIST 0x10
 #define CMD_WCLIST 0x11
@@ -30,6 +36,7 @@
 #define CMD_FSAVE 0x61
 #define CMD_FLOAD 0x62
 #define CMD_FFILES 0x63
+#define CMD_FROM 0x64
 
 static volatile uint16_t st_idx;
 static volatile uint16_t st_size;
@@ -91,7 +98,7 @@ void setup() {
   }
   file.close();
   
-  st_buffer = new char[8192];
+  st_buffer = new char[BUFSIZE+2];
 
   ESP_BT.begin("MSX-IoT BT"); //Name of your Bluetooth Signal
   
@@ -126,7 +133,7 @@ void setup() {
 
 void IRAM_ATTR readData(uint8_t data)
 {
-  if (st_size<8192) //<sizeof(_buffer))
+  if (st_size<BUFSIZE) //<sizeof(_buffer))
   {
     st_buffer[st_size++]=data;
   }
@@ -161,6 +168,7 @@ void IRAM_ATTR readCommand(uint8_t cmd)
     case CMD_FLOAD:
     case CMD_FFILES:
     case CMD_FNAME:
+    case CMD_FROM:
       st_status = 0x80;
       st_cmd = cmd;
       break;
@@ -463,6 +471,31 @@ void loop() {
         st_status=0x40;
       }
       break;    
+    case CMD_FROM:
+      {
+        //for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_file_name)-1; st_idx++)
+        //  st_file_name[st_idx] = st_buffer[st_idx];
+        //st_file_name[st_idx]='\0';
+        sprintf(st_file_name, "game.rom");
+        Serial.println("FROM st_file_name="+String(st_file_name));
+        String fname = "/"+String(st_file_name);
+        File f = SPIFFS.open(fname.c_str(), "r");
+        if (f) {
+          st_size=f.size()+2;
+          st_buffer[0]=(uint8_t)(st_size & 0xff);
+          st_buffer[1]=(uint8_t)(st_size >> 8);
+          Serial.println(String(f.size()));
+          Serial.println(String(st_size));
+          Serial.println(String((int)st_buffer[0]));
+          Serial.println(String((int)st_buffer[1]));
+          f.read((uint8_t*)(st_buffer+2), f.size());
+          f.close();
+        }
+        st_idx=0;
+        st_cmd = 0;
+        st_status=0x40;
+      }
+      break;    
     case CMD_FFILES:
       {
         File root = SPIFFS.open("/");
@@ -481,5 +514,10 @@ void loop() {
         st_status = 0x40;
       }
       break;
+    case CMD_SENDSTR:
+    case CMD_NULL:
+      break;
+    default:
+      Serial.println("comando desconocido "+String(st_cmd));
   }
 }
