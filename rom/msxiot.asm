@@ -612,6 +612,14 @@ MEMTEST:
 	LD		IX,MXFER
 	POP		IY
 	CALL	CALSLT
+	LD		A,32
+	CALL	CHPUT
+	IN		A,(#A8)
+	CALL	PRINTHEX
+	LD		A,(#4000)
+	CALL	PRINTHEX
+	LD		A,(#4001)
+	CALL	PRINTHEX
 	
 	LD		HL,_MEMTESTMSG
 .LOOP_T
@@ -632,20 +640,37 @@ MEMTEST:
 	ORG		#8000
 _TIMEOUTMSG2:
 	DB		'Timeout(2)',#13,#10,#0
+
 MXFER:
-	LD		A,64
-	CALL	CHPUT
 	PUSH	HL
 	PUSH	BC
+	LD		A,'>'
+	CALL	CHPUT
+	IN		A,(#A8)
+	CALL	PRINTHEX2
+	LD		C,A
+	AND 	11110011b
+	OR  	00000100b
+	OUT		(#A8),A
+	CALL	PRINTHEX2
+	LD		HL,#4000
+	LD		A,(HL)
+	CALL	PRINTHEX2
+	
 	LD		A,CMD_FROM
 	OUT		(CMDPORT),A
 	CALL	DELAY2
+	
 .LOOP1
 	IN		A,(CMDPORT)
 	CALL	DELAY2
 	AND		#80
-	JR		Z,.LOOP2
-	JR		.LOOP1
+	JR		NZ,.LOOP1
+
+	IN		A,(DATPORT)
+	CALL	DELAY2
+	IN		A,(DATPORT)
+	CALL	DELAY2
 ;.TIMEOUT
 ;	LD		HL,_TIMEOUTMSG2
 ;.LOOP_T
@@ -662,12 +687,17 @@ MXFER:
 	JR		Z,.END
 	IN		A,(DATPORT)
 	CALL	DELAY2
-	CALL	CHPUT
+	LD		(HL),A
+	INC		HL
 	JR		.LOOP2
 .END	
 	POP		BC
 	POP		HL
+	LD		A,(#4000)
+	CALL	PRINTHEX2
 	OR      A
+	LD		HL,(#4002) ;salto al init
+	PUSH	HL
 	RET	
 	
 DELAY2:
@@ -683,5 +713,28 @@ DELAY2:
 	JR		NZ,.LOOP
 	POP		AF
 	RET
+
+;---------------------------
+PRINTHEX2:
+	PUSH	AF
+	PUSH	AF
+    CALL 	.Num1
+	CALL	CHPUT
+	POP		AF
+	CALL 	.Num2
+	CALL	CHPUT
+	POP		AF
+	RET  	; return with hex number in de
+.Num1        
+	RRA
+	RRA
+	RRA
+	RRA
+.Num2        
+	OR		#F0
+	DAA
+	ADD 	A,#A0
+	ADC 	A,#40 ; Ascii hex at this point (0 to F)   
+	RET	
 
 	DS      #0C000-$
