@@ -15,8 +15,8 @@
 #define PIN_A0 33
 #define DATA_PINS {15,16,17,18,19,21,22,23} 
 
-//16384
-#define BUFSIZE 0x4000
+//32768+2
+#define BUFSIZE 0x8002
 
 #define CMD_NULL 0x00
 #define CMD_SENDSTR 0x01
@@ -473,10 +473,10 @@ void loop() {
       break;    
     case CMD_FROM:
       {
-        //for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_file_name)-1; st_idx++)
-        //  st_file_name[st_idx] = st_buffer[st_idx];
-        //st_file_name[st_idx]='\0';
-        sprintf(st_file_name, "game.rom");
+        for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_file_name)-1; st_idx++)
+          st_file_name[st_idx] = st_buffer[st_idx];
+        st_file_name[st_idx]='\0';
+        //sprintf(st_file_name, "game.rom");
         Serial.println("FROM st_file_name="+String(st_file_name));
         String fname = "/"+String(st_file_name);
         File f = SPIFFS.open(fname.c_str(), "r");
@@ -503,7 +503,7 @@ void loop() {
         st_size=0;
        
         while(file){
-          st_size += sprintf(&st_buffer[st_size], "%s\r\n", file.name());
+          st_size += sprintf(&st_buffer[st_size], "%-13s\t%6i\r\n", file.name(), file.size());
           file = root.openNextFile();
         }
         file.close();

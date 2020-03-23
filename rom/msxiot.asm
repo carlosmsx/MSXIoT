@@ -321,13 +321,10 @@ CMDS:
 	DEFW	_TCPSVR
 	DEFB	"TCPSEND",0
 	DEFW	_TCPSEND
-	DEFB	"FROM",0
-	DEFW	_FROM
+	DEFB	"LOADROM",0
+	DEFW	_LOADROM
 	DEFB	0               ; No more commands
 
-_FROM:
-	LD		A,CMD_FROM
-	JP		MEMTEST
 ;---------------------------------
 _FFILES:
 	LD		A,CMD_FFILES
@@ -601,26 +598,32 @@ PRINTHEX:
 	ADC 	A,#40 ; Ascii hex at this point (0 to F)   
 	RET	
 
-MEMTEST:
+_LOADROM:
+	LD		A,CMD_FROM
+	CALL	_STRCMD
 	PUSH	HL
 	PUSH	BC
-	IN		A,(#A8)
-	CALL	PRINTHEX
+	PUSH	DE
 	CALL	GTSL10
+	CALL	PRINTHEX
 	PUSH	AF
-	CALL	PRINTHEX
-	LD		IX,MXFER
 	POP		IY
+	LD		IX,MXFER
 	CALL	CALSLT
-	LD		A,32
+	LD		A,H
+	CALL	PRINTHEX
+	LD		A,L
+	CALL	PRINTHEX
+	PUSH	HL				;guardo INIT de la ROM
+	CALL	MXFER0
+	LD		A,64
 	CALL	CHPUT
-	IN		A,(#A8)
-	CALL	PRINTHEX
-	LD		A,(#4000)
-	CALL	PRINTHEX
-	LD		A,(#4001)
-	CALL	PRINTHEX
-	
+	LD		A,1
+	PUSH	AF
+	POP		IY
+	POP		IX				;INIT de la ROM
+	CALL	CALSLT
+
 	LD		HL,_MEMTESTMSG
 .LOOP_T
 	LD		A,(HL)
@@ -629,12 +632,32 @@ MEMTEST:
 	CALL	CHPUT
 	INC		HL
 	JR		.LOOP_T
-.END	
+.END
+	POP		DE
 	POP		BC
 	POP		HL
 	OR      A
 	RET
 
+MXFER0:
+	IN		A,(#A8)		
+	AND 	11001111b
+	OR  	00010000b
+	OUT		(#A8),A		;selecciono RAM de DPC200
+	LD		HL,#8000
+	LD		A,B
+	CALL	PRINTHEX
+	LD		A,C
+	CALL	PRINTHEX
+
+.LOOP2
+	IN		A,(DATPORT)
+	CALL	DEMORA
+	LD		(HL),A
+	INC		HL
+	DJNZ	.LOOP2
+	RET
+	
 
 	DS      #8000-$
 	ORG		#8000
@@ -642,62 +665,57 @@ _TIMEOUTMSG2:
 	DB		'Timeout(2)',#13,#10,#0
 
 MXFER:
-	PUSH	HL
-	PUSH	BC
-	LD		A,'>'
-	CALL	CHPUT
-	IN		A,(#A8)
-	CALL	PRINTHEX2
-	LD		C,A
+	;PUSH	HL
+	;PUSH	DE
+
+	IN		A,(#A8)		
+	LD		E,A			;guardo el estado actual
 	AND 	11110011b
 	OR  	00000100b
-	OUT		(#A8),A
-	CALL	PRINTHEX2
-	LD		HL,#4000
-	LD		A,(HL)
-	CALL	PRINTHEX2
-	
-	LD		A,CMD_FROM
+	OUT		(#A8),A		;selecciono RAM de DPC200
+
+	LD		A,CMD_FROM	;comando para cargar ROM
 	OUT		(CMDPORT),A
 	CALL	DELAY2
+	LD		HL,#4000
 	
 .LOOP1
-	IN		A,(CMDPORT)
+	IN		A,(CMDPORT)	;TODO: chequear flag de error
 	CALL	DELAY2
 	AND		#80
 	JR		NZ,.LOOP1
 
-	IN		A,(DATPORT)
+	IN		A,(DATPORT)	;leo parte baja SIZE
+	LD		C,A
 	CALL	DELAY2
-	IN		A,(DATPORT)
+	IN		A,(DATPORT)	;leo parte alta SIZE
+	LD		B,A
 	CALL	DELAY2
-;.TIMEOUT
-;	LD		HL,_TIMEOUTMSG2
-;.LOOP_T
-;	LD		A,(HL)
-;	OR		A
-;	JR		Z,.END
-;	CALL	CHPUT
-;	INC		HL
-;	JR		.LOOP_T
+	DEC		BC
+	DEC		BC
+
 .LOOP2
-	IN		A,(CMDPORT)
-	CALL	DELAY2
-	AND		#40
-	JR		Z,.END
 	IN		A,(DATPORT)
 	CALL	DELAY2
 	LD		(HL),A
+	DEC		BC
 	INC		HL
-	JR		.LOOP2
+	LD		A,B
+	OR		C
+	JR		NZ,.CONTINUE
+	;si se cargo el TOTAL, entonces la ROM está completa y salto al INIT
+	LD		HL,(#4002)
+	PUSH	HL	
+	RET
+	
+.CONTINUE
+	BIT		7,H			;chequeo que no haya alcanzado #8000, en tal caso debe retornar y continuar cargando
+	JR		Z,.LOOP2
+
 .END	
-	POP		BC
-	POP		HL
-	LD		A,(#4000)
-	CALL	PRINTHEX2
-	OR      A
-	LD		HL,(#4002) ;salto al init
-	PUSH	HL
+	LD		HL,(#4002)
+	LD		A,E
+	OUT		(#A8),A		;restauro paginas
 	RET	
 	
 DELAY2:
