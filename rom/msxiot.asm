@@ -41,6 +41,8 @@ CMD_FLOAD	EQU 	#62
 CMD_FFILES	EQU 	#63
 CMD_FROM	EQU		#64
 
+CMD_CLOUDROM	EQU		#70
+
 CMDPORT		EQU		1
 DATPORT		EQU		0
 _TIMEOUT	EQU		#ffff
@@ -323,6 +325,8 @@ CMDS:
 	DEFW	_TCPSEND
 	DEFB	"LOADROM",0
 	DEFW	_LOADROM
+	DEFB	"CLOUD",0
+	DEFW	_CLOUDROM
 	DEFB	0               ; No more commands
 
 ;---------------------------------
@@ -350,10 +354,11 @@ _WLIST:
 	LD		A,CMD_WLIST
 
 GETLOG:
-	PUSH	HL
-	PUSH	BC
 	OUT		(CMDPORT),A
 	CALL	DEMORA
+GETLOG1:
+	PUSH	HL
+	PUSH	BC
 	LD		BC,_TIMEOUT
 .LOOP1
 	IN		A,(CMDPORT)
@@ -481,10 +486,15 @@ DEMORA:
 	RET
 
 ;---------------------------------
+_CLOUDROM:
+	LD		A,CMD_CLOUDROM
+	CALL	_STRCMD
+	JP		GETLOG1
+;---------------------------------
 _TCPSEND:
 	LD		A,CMD_TCPSEND
 	CALL	_STRCMD
-	JP		GETLOG
+	JP		GETLOG1
 ;---------------------------------
 _TCPSVR:
 	LD		A,CMD_TCPSVR

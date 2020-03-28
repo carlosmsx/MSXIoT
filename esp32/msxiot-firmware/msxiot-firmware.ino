@@ -4,8 +4,10 @@
  * 
  * Placa: ESP32 Dev Module
  */
+ 
 #include "BluetoothSerial.h" 
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include <string.h>
 #include "SPIFFS.h"
 
@@ -36,18 +38,34 @@
 #define CMD_FSAVE 0x61
 #define CMD_FLOAD 0x62
 #define CMD_FFILES 0x63
-#define CMD_FROM 0x64
+#define CMD_LOADROM 0x64
+
+#define CMD_CLOUDROM 0x70
 
 static volatile uint16_t st_idx;
-static volatile uint16_t st_size;
+static volatile uint16_t st_size; //mantiene el tamaño del dato en el buffer
+static volatile uint8_t st_cmd;   //indica el comando ejecutado
+
 static volatile uint8_t st_status;
-static volatile uint8_t st_cmd;
-//static volatile uint16_t st_counter=0;
-//static volatile uint16_t st_counter2=0;
-//static volatile uint16_t st_counter3=0;
+/*
+  st_status: variable que indica el estado de la última operación
+    7 6 5 4 3 2 1 0
+    | | | | | | | \__ 
+    | | | | | | \____
+    | | | | | \______
+    | | | | \________
+    | | | \__________
+    | | \____________
+    | \______________ en alto indica que hay datos disponibles para leer desde el BUFFER (DATA_READY)
+    \________________ en alto indica que la interfaz está ocupada (BUSY)
+ */
+
+#define BUSY 0x80
+#define DATA_READY 0x40
+
 char *st_buffer; //dynamically better
-char st_ssid[32];
-char st_password[32];
+char *st_ssid = NULL;
+char *st_password = NULL;
 char st_server[64];
 char st_file_name[64];
 static volatile uint16_t st_server_port;
@@ -82,21 +100,22 @@ void IRAM_ATTR TaskISR( void * parameter)
 
 void setup() {
   Serial.begin(115200);
+  
   if (!SPIFFS.begin(true)) {
     Serial.println("An Error has occurred while mounting SPIFFS");
     return;
   }
- 
+
+  /*
   File root = SPIFFS.open("/");
- 
   File file = root.openNextFile();
- 
   while(file){
       Serial.print("FILE: ");
       Serial.println(file.name());
       file = root.openNextFile();
   }
   file.close();
+  */
   
   st_buffer = new char[BUFSIZE+2];
 
@@ -118,16 +137,7 @@ void setup() {
   Serial.print(s);
 
   xTaskCreate(TaskISR, "decoInt", 1000, NULL, 10, &xTaskToNotify);
-  
-   /*
-  WiFi.begin(ssid, password);  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Establishing connection to WiFi..");
-  }
-  Serial.println("conectado!!");
-  */
-  
+    
   attachInterrupt(digitalPinToInterrupt(PIN_WAIT_ST), decoInt, FALLING);
 }
 
@@ -143,14 +153,14 @@ void IRAM_ATTR readData(uint8_t data)
 
 void IRAM_ATTR readCommand(uint8_t cmd)
 {
-  if (st_status & 0x80) 
+  if (st_status & BUSY) 
     return;
 
   switch(cmd){
     case CMD_SENDSTR:
       st_idx = 0;
       st_size=0;
-      st_status = 0x40;
+      st_status = DATA_READY;
       st_cmd = cmd;
       break;
     case CMD_WLIST:
@@ -168,8 +178,9 @@ void IRAM_ATTR readCommand(uint8_t cmd)
     case CMD_FLOAD:
     case CMD_FFILES:
     case CMD_FNAME:
-    case CMD_FROM:
-      st_status = 0x80;
+    case CMD_LOADROM:
+    case CMD_CLOUDROM:
+      st_status = BUSY;
       st_cmd = cmd;
       break;
   }
@@ -192,13 +203,13 @@ void IRAM_ATTR receiveByte(int A0)
     readCommand(data);  
 
   while (digitalRead(PIN_WAIT_ST)==LOW)
-    digitalWrite(PIN_WAIT_EN, HIGH); //LOW);
-  digitalWrite(PIN_WAIT_EN, LOW); //HIGH);
+    digitalWrite(PIN_WAIT_EN, HIGH); 
+  digitalWrite(PIN_WAIT_EN, LOW);
 }
 
 uint8_t IRAM_ATTR writeData()
 {
-  if (st_status==0x40 && st_idx<st_size) //<sizeof(_buffer))
+  if (st_status==DATA_READY && st_idx<st_size)
   {
     return st_buffer[st_idx++];
   }
@@ -261,25 +272,24 @@ void IRAM_ATTR decoInt()
     portYIELD_FROM_ISR( );
 }
 
-//uint16_t ant=0, ant2=0, ant3=0;
+void getStrFromBuffer(char **s)
+{
+  char *p = *s;
+  
+  if (p != NULL)
+    delete p;
+
+  p = new char[st_size+1];
+    
+  for (st_idx=0; st_idx<st_size; st_idx++)
+    p[st_idx] = st_buffer[st_idx];
+  p[st_idx]='\0';
+
+  Serial.println(p);
+  *s=p;
+}
+
 void loop() {
-  /*
-  if (ant!=st_counter)
-  {
-    Serial.println("1:"+String(st_counter));
-    ant=st_counter;
-  }
-  if (ant2!=st_counter2)
-  {
-    Serial.println(" 2:"+String(st_counter2));
-    ant2=st_counter2;
-  }
-  if (ant3!=st_counter3)
-  {
-    Serial.println("  3:"+String(st_counter3));
-    ant3=st_counter3;
-  }
-  */
   if (Serial.available()>0)
   {
     String s=Serial.readString();
@@ -300,6 +310,7 @@ void loop() {
     else
       st_status=(byte)atoi(s.c_str());
   }
+
   switch(st_cmd)
   {
     case CMD_WLIST:
@@ -309,12 +320,12 @@ void loop() {
         int numSsid = WiFi.scanNetworks();
         
         if (numSsid == -1)
-          st_size = sprintf(st_buffer, "no hay redes\r\n");
+          st_size = sprintf(st_buffer, "WiFi net not found\r\n");
         else
         {
           st_size=0;
           for (int thisNet = 0; thisNet < numSsid; thisNet++) {
-            if (st_cmd==CMD_WCLIST) 
+            if (st_cmd == CMD_WCLIST) 
               st_size += sprintf(&st_buffer[st_size], "_WNET(\"%s\")\r\n", WiFi.SSID(thisNet).c_str());
             else
               st_size += sprintf(&st_buffer[st_size], "%s\r\n", WiFi.SSID(thisNet).c_str());
@@ -323,31 +334,47 @@ void loop() {
         Serial.write((uint8_t*)st_buffer, st_size);
         st_cmd = 0;
         st_idx = 0;
-        st_status = 0x40;
+        st_status = DATA_READY;
       }
       break;
     case CMD_WCONN:
       {
-        Serial.println("procesando comando "+String(st_cmd, HEX));
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(st_ssid, st_password);
-       
-        uint8_t i = 0;
-        while (WiFi.status() != WL_CONNECTED)
+        if (st_ssid == NULL && st_password == NULL) 
         {
-          Serial.print('.');
-          delay(500);
-       
-          if ((++i % 16) == 0)
-          {
-            Serial.println(F(" still trying to connect"));
-          }
+          st_size = sprintf(st_buffer, "first run _wnet(...) and _wpass(...)\r\n");
         }
-        st_size = sprintf(st_buffer, "Connected to \"%s\"\r\nIP: %s\r\n", st_ssid, WiFi.localIP().toString().c_str());
-        Serial.write((uint8_t*)st_buffer, st_size);
+        else if (st_ssid == NULL) 
+        {
+          st_size = sprintf(st_buffer, "first run _wnet(...)\r\n");
+        }
+        else if (st_password == NULL) 
+        {
+          st_size = sprintf(st_buffer, "first run _wpass(...)\r\n");
+        }
+        else
+        {
+          Serial.println("procesando comando "+String(st_cmd, HEX));
+          WiFi.mode(WIFI_STA);
+          WiFi.begin(st_ssid, st_password);
+         
+          //TODO: manejar máximo de reintentos para que no quede infinitamente
+          uint8_t i = 0;
+          while (WiFi.status() != WL_CONNECTED)
+          {
+            Serial.print('.');
+            delay(500);
+         
+            if ((++i % 16) == 0)
+            {
+              Serial.println(F(" still trying to connect"));
+            }
+          }
+          st_size = sprintf(st_buffer, "Connected to \"%s\"\r\nIP: %s\r\n", st_ssid, WiFi.localIP().toString().c_str());
+          Serial.write((uint8_t*)st_buffer, st_size);
+        }
         st_cmd = 0;
         st_idx = 0;
-        st_status = 0x40;
+        st_status = DATA_READY;
       }
       break;
     case CMD_WDISCON:
@@ -357,7 +384,7 @@ void loop() {
         Serial.write((uint8_t*)st_buffer, st_size);
         st_cmd = 0;
         st_idx = 0;
-        st_status = 0x40;
+        st_status = DATA_READY;
       }
       break;
     case CMD_WSTAT:
@@ -369,21 +396,27 @@ void loop() {
         Serial.write((uint8_t*)st_buffer, st_size);
         st_cmd = 0;
         st_idx = 0;
-        st_status = 0x40;
+        st_status = DATA_READY;
       }
       break;
     case CMD_WNET:
+      /*
       for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_ssid)-1; st_idx++)
         st_ssid[st_idx] = st_buffer[st_idx];
       st_ssid[st_idx]='\0';
+      */
+      getStrFromBuffer(&st_ssid);
       Serial.println("ssid="+String(st_ssid));
       st_cmd = 0;
       st_status=0;
       break;    
     case CMD_WPASS:
+      /*
       for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_password)-1; st_idx++)
         st_password[st_idx] = st_buffer[st_idx];
       st_password[st_idx]='\0';
+      */
+      getStrFromBuffer(&st_password);
       Serial.println("password="+String(st_password));
       st_cmd = 0;
       st_status=0;
@@ -423,7 +456,7 @@ void loop() {
         }
         st_cmd = 0;
         st_idx = 0;
-        st_status = 0x40;
+        st_status = DATA_READY;
       }
       break;
     case CMD_FNAME:
@@ -468,10 +501,10 @@ void loop() {
         }
         st_idx=0;
         st_cmd = 0;
-        st_status=0x40;
+        st_status=DATA_READY;
       }
       break;    
-    case CMD_FROM:
+    case CMD_LOADROM:
       {
         for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_file_name)-1; st_idx++)
           st_file_name[st_idx] = st_buffer[st_idx];
@@ -493,7 +526,7 @@ void loop() {
         }
         st_idx=0;
         st_cmd = 0;
-        st_status=0x40;
+        st_status=DATA_READY;
       }
       break;    
     case CMD_FFILES:
@@ -511,7 +544,54 @@ void loop() {
         Serial.write((uint8_t*)st_buffer, st_size);
         st_cmd = 0;
         st_idx = 0;
-        st_status = 0x40;
+        st_status = DATA_READY;
+      }
+      break;
+    case CMD_CLOUDROM:
+      {
+        //char st_url[128];
+        //for (st_idx=0; st_idx<st_size && st_idx<sizeof(st_url)-1; st_idx++)
+        //  st_url[st_idx] = st_buffer[st_idx];
+        //st_url[st_idx]='\0';
+        char *st_url=NULL;
+        getStrFromBuffer(&st_url);
+
+        String file_name=String(st_url).substring(String(st_url).lastIndexOf('/'));
+        //Serial.println(st_url);
+        HTTPClient http;
+        File f = SPIFFS.open(file_name, "w");
+        if (f) {
+          http.begin(st_url);
+          int httpCode = http.GET();
+          if (httpCode > 0) 
+          {
+            if (httpCode == HTTP_CODE_OK) 
+            {
+              http.writeToStream(&f);
+              st_size = sprintf(st_buffer, "Downloaded to \"%s\"\r\n", file_name.c_str());
+            }
+            else 
+            {
+              Serial.printf("[HTTP] GET... failed, error: %s\r\n", http.errorToString(httpCode).c_str());
+              st_size = sprintf(st_buffer, "HTTP GET error: %i\r\n", httpCode);
+            }          
+          } else 
+          {
+            Serial.printf("[HTTP] GET... failed, error: %s\r\n", http.errorToString(httpCode).c_str());
+            st_size = sprintf(st_buffer, "HTTP GET error: %i\r\n", httpCode);
+          }
+          f.close();
+        }
+        else
+        {
+          st_size = sprintf(st_buffer, "Error openning file\r\n");
+        }
+        http.end();
+
+        delete st_url;
+        st_status = DATA_READY;
+        st_cmd = 0;
+        st_idx = 0;
       }
       break;
     case CMD_SENDSTR:
