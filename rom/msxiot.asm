@@ -43,6 +43,10 @@ CMD_FROM	EQU		#64
 
 CMD_CLOUDROM	EQU		#70
 
+CMD_GD_LST	EQU		#80
+CMD_GD_UPL	EQU		#81
+CMD_GD_DWL	EQU		#82
+
 CMDPORT		EQU		1
 DATPORT		EQU		0
 _TIMEOUT	EQU		#ffff
@@ -327,8 +331,10 @@ CMDS:
 	DEFW	_LOADROM
 	DEFB	"CLOUD",0
 	DEFW	_CLOUDROM
+	DEFB	"DRVUP",0
+	DEFW	_DRV_UP
 	DEFB	0               ; No more commands
-
+	
 ;---------------------------------
 _FFILES:
 	LD		A,CMD_FFILES
@@ -485,6 +491,11 @@ DEMORA:
 	POP		AF
 	RET
 
+;---------------------------------
+_DRV_UP:
+	LD		A,CMD_GD_UPL
+	CALL	_STRCMD
+	JP		GETLOG1
 ;---------------------------------
 _CLOUDROM:
 	LD		A,CMD_CLOUDROM

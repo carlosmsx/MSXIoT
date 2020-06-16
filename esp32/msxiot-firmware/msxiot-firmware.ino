@@ -3,6 +3,7 @@
  * Autor: Carlos Escobar
  * 
  * Placa: ESP32 Dev Module
+ * Partition Scheme: Huge APP (3MB No OTA/1MB SPIFFS)
  */
  
 #include "BluetoothSerial.h" 
@@ -10,6 +11,7 @@
 #include <HTTPClient.h>
 #include <string.h>
 #include "SPIFFS.h"
+#include "GDrive.h"
 
 #define PIN_WAIT_EN 32
 #define PIN_WAIT_ST 13
@@ -41,6 +43,10 @@
 #define CMD_LOADROM 0x64
 
 #define CMD_CLOUDROM 0x70
+
+#define CMD_GD_LST  0x80
+#define CMD_GD_UPL  0x81
+#define CMD_GD_DWL  0x82
 
 static volatile uint16_t st_idx;
 static volatile uint16_t st_size; //mantiene el tamaño del dato en el buffer
@@ -180,6 +186,7 @@ void IRAM_ATTR readCommand(uint8_t cmd)
     case CMD_FNAME:
     case CMD_LOADROM:
     case CMD_CLOUDROM:
+    case CMD_GD_UPL:
       st_status = BUSY;
       st_cmd = cmd;
       break;
@@ -570,7 +577,12 @@ void loop() {
               http.writeToStream(&f);
               st_size = sprintf(st_buffer, "Downloaded to \"%s\"\r\n", file_name.c_str());
             }
-            else 
+            else if (httpCode == 301) //redireccion
+            {
+              Serial.println("ups");
+              st_size = sprintf(st_buffer, "HTTP GET redirect\r\n", httpCode);
+            }
+            else
             {
               Serial.printf("[HTTP] GET... failed, error: %s\r\n", http.errorToString(httpCode).c_str());
               st_size = sprintf(st_buffer, "HTTP GET error: %i\r\n", httpCode);
@@ -589,6 +601,33 @@ void loop() {
         http.end();
 
         delete st_url;
+        st_status = DATA_READY;
+        st_cmd = 0;
+        st_idx = 0;
+      }
+      break;
+    case CMD_GD_UPL:
+      {
+        char *fileName = NULL;
+        getStrFromBuffer(&fileName);
+
+        String file_name= "/" + String(fileName);
+        File f = SPIFFS.open(file_name.c_str(), "r");
+        if (f) {
+          st_size=f.size();
+          f.read((uint8_t*)(st_buffer), f.size());
+          f.close();
+          if (upload(st_buffer, st_size, 10000))
+            st_size = sprintf(st_buffer, "Upload Ok\r\n");
+          else
+            st_size = sprintf(st_buffer, "Upload Error\r\n");
+        }
+        else
+        {
+          st_size = sprintf(st_buffer, "Error openning file\r\n");
+        }
+
+        delete fileName;
         st_status = DATA_READY;
         st_cmd = 0;
         st_idx = 0;
