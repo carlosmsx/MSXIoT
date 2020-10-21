@@ -1,0 +1,454 @@
+	TITLE   DSKDRV - MSXDOS disk driver for MSX-IoT hardware -
+	.Z80
+; symbols which can be used from the kernel
+
+; GETSLT	get my slotid
+; DIV16		divide
+
+	EXTRN   GETWRK          ;get base  of  work  area  in  [IX]  and
+							;[HL]
+; SETINT	install my interrupt handler
+; PRVINT	call orginal interrupt handler
+	EXTRN   SETINT,PRVINT
+; PROMPT	prompt for phantom drive
+; RAWFLG	verify flag
+; $SECBUF	temporary sectorbuffer
+; XFER		transfer to TPA
+; DISINT	inform interrupts are being disabled
+; ENAINT	inform interrupts are being enabled
+; PROCNM	CALL statement name
+
+; symbols which must be defined by the driver
+
+; INIHRD	initialize diskdriver hardware
+; DRIVES	how many drives are connected
+; INIENV	initialize diskdriver workarea
+; DSKIO		diskdriver sector i/o
+; DSKCHG	diskdriver diskchange status
+; GETDPB	build Drive Parameter Block
+; CHOICE	get format choice string
+; DSKFMT	format disk
+; MTOFF		stop diskmotor
+; OEMSTA	diskdriver special call statements
+
+; MYSIZE	size of diskdriver workarea
+; SECLEN	size of biggest sector supported by the diskdriver
+; DEFDPB	pointer to a default Drive Parameter Block
+
+
+; errorcodes used by DSKIO, DSKCHG and GETDPB
+;
+; 0	write protect error
+; 2	not ready error
+; 4	data (crc) error
+; 6	seek error
+; 8	record not found error
+; 10	write fault error
+; 12	other error
+
+; errorcodes used by DSKFMT
+;
+; 0	write protect error
+; 2	not ready error
+; 4	data (crc) error
+; 6	seek error
+; 8	record not found error
+; 10	write fault error
+; 12	bad parameter
+; 14	insufficient memory
+; 16	other error
+
+
+	PUBLIC	MYSIZE
+MYSIZE		equ	1		; Size of environment
+	PUBLIC	SECLEN
+SECLEN		equ	512		; Size of biggest sector
+
+; INIHRD
+;
+; Input:	None
+; Output:	None
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+
+	PUBLIC	INIHRD
+INIHRD:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_INIHRD
+	LD		BC,0800H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	RET
+
+; DRIVES
+;
+; Input: 	F	Zx set if to return physical drives
+;			Zx reset if to return at least 2 drives, if only one
+;			  physical drive it becomes a phantom drive
+; Output:	L	number of drives
+; Changed:	F,HL,IX,IY may be affected
+;
+; Remark:	DOS1 does not handle L=0 correctly
+
+	PUBLIC	DRIVES
+DRIVES:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_DRIVES
+	LD		BC,0800H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	ld	l,1
+	ret
+
+
+
+; INIENV
+;
+; Input: 	None
+; Output:	None
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+;
+; Remark:	examples installs own interrupt handler, but this is NOT required.
+;		depends on the hardware if this is needed.
+
+	PUBLIC	INIENV
+INIENV:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_INIENV
+	LD		BC,0800H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	call	GETWRK
+	ld		(hl),1
+	ld		hl,INTHAND
+	jp		SETINT
+
+INTHAND:	
+	push	af
+	push	bc
+	push	de
+	push	hl
+	push	ix
+	push	iy
+	call	GETWRK
+	inc	(hl)
+	pop	iy
+	pop	ix
+	pop	hl
+	pop	de
+	pop	bc
+	pop	af
+	jp	PRVINT
+
+WriteByte:
+	OUT		(0),A
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	RET
+
+WriteIO:
+	OUTI
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	JR		NZ,WriteIO
+	RET
+
+ReadIO:
+	INI
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	JR		NZ,ReadIO
+	RET
+	
+;
+; DSKIO
+;
+; Input: 	A	Drivenumber
+;		F	Cx reset for read
+;			Cx set for write
+; 		B	number of sectors
+; 		C	Media descriptor
+;		DE	logical sectornumber
+; 		HL	transferaddress
+; Output:	F	Cx set for error
+;			Cx reset for ok
+;		A	if error, errorcode
+;		B	if error, remaining sectors
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+
+	PUBLIC	DSKIO
+DSKIO:
+	PUSH	AF
+	JP      NC,READ         ;if no carry, we should read
+WRITE:
+	LD		A,0F0H			;write
+	CALL	WriteByte
+	POP		AF				;drive number
+	CALL	WriteByte
+	LD		A,B				;n-sectors
+	CALL	WriteByte
+	LD		A,C				;media
+	CALL	WriteByte
+	LD		A,D				;sec H
+	CALL	WriteByte
+	LD		A,E				;sec L
+	CALL	WriteByte
+	
+WRSEC:
+	PUSH	BC
+	LD		BC,0
+	CALL	WriteIO			;256 bytes
+	CALL	WriteIO			;256 bytes
+	POP		BC
+	DJNZ	WRSEC
+	;ld		a,12
+	scf
+	ccf						;no errors
+	ret
+	
+READ:
+	LD		A,0F1H			;read
+	CALL	WriteByte
+	POP		AF				;drive number
+	CALL	WriteByte		
+	LD		A,B				;n-sectors
+	CALL	WriteByte		
+	LD		A,C				;media
+	CALL	WriteByte
+	LD		A,D				;sec H
+	CALL	WriteByte
+	LD		A,E				;sec L
+	CALL	WriteByte
+
+RDSEC:
+	PUSH	BC
+	LD		BC,0
+	CALL	ReadIO			;256 bytes
+	CALL	ReadIO			;256 bytes
+	POP		BC
+	DJNZ	RDSEC
+	;ld		a,12
+	scf
+	ccf						;no errors
+	ret
+
+; DSKCHG
+;
+; Input: 	A	Drivenumber
+; 		B	0
+; 		C	Media descriptor
+; 		HL	pointer to DPB
+; Output:	F	Cx set for error
+;			Cx reset for ok
+;		A	if error, errorcode
+;		B	if no error, disk change status
+;			01 disk unchanged
+;			00 unknown
+;			FF disk changed
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+; Remark:	DOS1 kernel expects the DPB updated when disk change status is unknown or changed
+;		DOS2 kernel does not care if the DPB is updated or not
+
+	PUBLIC	DSKCHG
+DSKCHG:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_DSKCHG
+	LD		BC,0800H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	or	a
+	ld	b,1
+	ret
+
+
+
+; GETDPB
+;
+; Input: 	A	Drivenumber
+; 		B	first byte of FAT
+; 		C	Media descriptor
+; 		HL	pointer to DPB
+; Output:	[HL+1]
+;		..
+;		[HL+18]	updated
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+
+	PUBLIC	GETDPB
+GETDPB:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_GETDPB
+	LD		BC,0800H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	or		a
+	ex		de,hl
+	inc		de
+	ld		hl,DpbTable
+	ld		bc,18
+	ldir
+	ret
+
+DpbTable:
+	db		0F9h	; Media F9
+	dw		512		; 80 Tracks
+	db		0Fh		; 9 sectors
+	db		04h		; 2 sides
+	db		01h		; 3.5" 720 Kb
+	db		02h
+	dw		1
+	db		2
+	db		112
+	dw		14
+	dw		714
+	db		3
+	dw		7
+
+	PUBLIC	DEFDPB
+DEFDPB		equ	DpbTable
+
+; CHOICE
+;
+; Input: 	None
+; Output:	HL	pointer to choice string, 0 if no choice
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+
+	PUBLIC	CHOICE
+CHOICE:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_CHOICE
+	LD		BC,0800H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	ld		hl,ChoiceStr
+	ret
+
+ChoiceStr:	
+	db		13,10
+	db		"1 - Choice A",13,10
+	db		"2 - Choice B",13,10
+	db		13,10
+	db		0
+
+
+
+; DSKFMT
+;
+; Input: 	A	choicecode (1-9)
+;		D	drivenumber
+;		HL	begin of workarea
+;		BC	length of workarea
+; Output:	F	Cx set for error
+;			Cx reset for ok
+;		A	if error, errorcode
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+
+	PUBLIC	DSKFMT
+DSKFMT:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_DSKFMT
+	LD		BC,0800H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	ld		a,16
+	scf
+	ret
+
+
+
+; OEMSTATEMENT
+;
+; Input:	HL	basicpointer
+; Output:	F	Cx set if statement not recognized
+;			Cx reset if statement is recognized
+;		HL	basicpointer,	updated if recognized
+;					unchanged if not recognized
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+
+	PUBLIC	OEMSTATEMENT
+OEMSTATEMENT:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_OEMSTATEMENT
+	LD		BC,0E00H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	scf
+	ret
+
+; MTOFF
+;
+; Input:	None
+; Output:	None
+; Changed:	AF,BC,DE,HL,IX,IY may be affected
+
+	PUBLIC	MTOFF
+MTOFF:
+	PUSH	HL
+	PUSH	BC
+	LD		HL,S_MTOFF
+	LD		BC,0700H
+	CALL	WriteIO
+	POP		BC
+	POP		HL
+	ret
+
+S_INIHRD:
+	DB	"INIHRD", 13, 10
+S_DRIVES:
+	DB	"DRIVES", 13, 10
+S_INIENV:
+	DB	"INIENV", 13, 10
+S_DSKIO:
+	DB	"DSKIO", 13, 10
+S_DSKCHG:
+	DB	"DSKCHG", 13, 10
+S_GETDPB:
+	DB	"GETDPB", 13, 10
+S_CHOICE:
+	DB	"CHOICE", 13, 10
+S_DSKFMT:
+	DB	"DSKFMT", 13, 10
+S_OEMSTATEMENT:
+	DB	"OEMSTATEMENT", 13, 10
+S_MTOFF:
+	DB	"MTOFF", 13, 10
+
+	END
