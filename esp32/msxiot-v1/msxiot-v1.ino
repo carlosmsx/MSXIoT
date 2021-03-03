@@ -139,7 +139,7 @@ void setup() {
     return;
   }
 
-  dsk = SPIFFS.open("/4K.DSK", "r+");
+  //dsk = SPIFFS.open("/4K.DSK", "r+");
 
   Serial.print("MSX IoT 2020 corriendo en core "+String(xPortGetCoreID())+"\n");
 
@@ -201,6 +201,7 @@ void loop() {
       address |= data;
       idx = 0;
       Serial.println("WR drive="+String(drive_number)+" n_sec="+String(n_sectors)+" med="+String(media,HEX)+" addr="+String(address));
+      dsk = SPIFFS.open("/4K.DSK", "r+");
       state = 15;
       RELEASE_WAIT;
       break;
@@ -216,6 +217,7 @@ void loop() {
         n_sectors--;  
         if (n_sectors == 0)
         {
+          dsk.close();
           state = 0;
         }
       }
@@ -250,6 +252,7 @@ void loop() {
       address |= data;
       idx = 0;
       Serial.println("RD drive="+String(drive_number)+" n_sec="+String(n_sectors)+" med="+String(media,HEX)+" addr="+String(address));
+      dsk = SPIFFS.open("/4K.DSK", FILE_READ);
       dsk.seek(address * 512, SeekSet);
       dsk.read(buf, 512);
       state = 25;
@@ -268,7 +271,10 @@ void loop() {
           address++;
           n_sectors--;  
           if (n_sectors == 0)
+          {
             state = 0;
+            dsk.close();
+          }
           else
           { 
             dsk.seek(address * 512, SeekSet);

@@ -1,5 +1,12 @@
 	TITLE   DSKDRV - MSXDOS disk driver for MSX-IoT hardware -
 	.Z80
+	
+;How to compile:
+;  1) RunCPM
+;  1.1) M80 =drvdsk
+;  1.2) l80 /p:4000,/d:f237,doshead,bios,msxdos,smldisp,init,dskbasic,msxdata,dskdrv,basdata,msxdos/n/x/y/e
+;  2) hex2bin -e rom -l 4000 a\0\msxdos.hex
+
 ; symbols which can be used from the kernel
 
 ; GETSLT	get my slotid
@@ -159,6 +166,20 @@ WriteByte:
 	NOP
 	RET
 
+WriteCommand:
+	OUT		(0),A
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	RET
+
 WriteIO:
 	OUTI
 	NOP
@@ -211,7 +232,7 @@ DSKIO:
 	JP      NC,READ         ;if no carry, we should read
 WRITE:
 	LD		A,0F0H			;write
-	CALL	WriteByte
+	CALL	WriteCommand
 	POP		AF				;drive number
 	CALL	WriteByte
 	LD		A,B				;n-sectors
@@ -237,7 +258,7 @@ WRSEC:
 	
 READ:
 	LD		A,0F1H			;read
-	CALL	WriteByte
+	CALL	WriteCommand
 	POP		AF				;drive number
 	CALL	WriteByte		
 	LD		A,B				;n-sectors
