@@ -3,27 +3,49 @@
 	
 ;How to compile:
 ;  1) RunCPM
-;  1.1) M80 =drvdsk
+;  1.1) M80 =dskdrv.mac
 ;  1.2) l80 /p:4000,/d:f237,doshead,bios,msxdos,smldisp,init,dskbasic,msxdata,dskdrv,basdata,msxdos/n/x/y/e
 ;  2) hex2bin -e rom -l 4000 a\0\msxdos.hex
+
+;28815 - 23438 = 5377
+;28815 - 26510 = 2305
+
+; External variables & routines
+CHPUT   	EQU     000A2H
+CALBAS		EQU		00159H
+ERRHAND 	EQU     0406FH
+FRMEVL  	EQU     04C64H
+CHRGTR  	EQU     04666H
+VALTYP  	EQU     0F663H
+USR     	EQU     0F7F8H
+PROCNM		EQU		0FD89H
+;ENASLT  	EQU     00024H          ;enable slot
+;RSLREG  	EQU     00138H          ;read primary slot select register
+;RSLGREG 	EQU		00138H
+;BOTTOM		EQU		0FC48H
+;HIMEM		EQU		0FC4AH
+;SLTWRK		EQU		0FD09H
+;EXPTBL  	EQU     0FCC1H          ;slot is expanded or not
+;CALSLT		EQU		0001CH
 
 ; symbols which can be used from the kernel
 
 ; GETSLT	get my slotid
 ; DIV16		divide
 
-	EXTRN   GETWRK          ;get base  of  work  area  in  [IX]  and
+EXTRN		GETWRK          ;get base  of  work  area  in  [IX]  and
 							;[HL]
 ; SETINT	install my interrupt handler
 ; PRVINT	call orginal interrupt handler
-	EXTRN   SETINT,PRVINT
+EXTRN		SETINT,PRVINT
 ; PROMPT	prompt for phantom drive
 ; RAWFLG	verify flag
 ; $SECBUF	temporary sectorbuffer
+EXTRN		$SECBUF
 ; XFER		transfer to TPA
 ; DISINT	inform interrupts are being disabled
 ; ENAINT	inform interrupts are being enabled
-; PROCNM	CALL statement name
+;EXTRN		PROCNM			;CALL statement name
 
 ; symbols which must be defined by the driver
 
@@ -41,6 +63,7 @@
 ; MYSIZE	size of diskdriver workarea
 ; SECLEN	size of biggest sector supported by the diskdriver
 ; DEFDPB	pointer to a default Drive Parameter Block
+
 
 
 ; errorcodes used by DSKIO, DSKCHG and GETDPB
@@ -65,11 +88,58 @@
 ; 14	insufficient memory
 ; 16	other error
 
-
 	PUBLIC	MYSIZE
 MYSIZE		equ	1		; Size of environment
 	PUBLIC	SECLEN
 SECLEN		equ	512		; Size of biggest sector
+
+;----Commands----
+CMD_SENDSTR	EQU		0E0H
+CMD_FSAVE	EQU		0E1H
+CMD_WRITE	EQU		0F0H
+CMD_READ	EQU		0F1H
+CMD_INIHRD	EQU		0F2H
+CMD_INIENV	EQU		0F3H
+CMD_DRIVES	EQU		0F4H
+CMD_DSKCHG	EQU		0F5H
+CMD_CHOICE	EQU		0F6H
+CMD_DSKFMT	EQU		0F7H
+CMD_OEMSTAT	EQU		0F8H
+CMD_MTOFF	EQU		0F9H
+CMD_GETDPB	EQU		0FAH
+
+;----I/O Ports----
+PORT_CMD	EQU		1
+PORT_DATA	EQU		0
+
+WriteByte:
+	OUT		(PORT_DATA),A
+	EX 		(SP),HL		;19 cycles
+	EX		(SP),HL		;19 cycles
+	RET
+
+WriteCommand:
+	OUT		(PORT_CMD),A
+	EX		(SP),HL
+	EX		(SP),HL
+	RET
+
+WriteBlock:
+	OUTI
+	EX		(SP),HL
+	EX		(SP),HL
+	JR		NZ,WriteBlock
+	RET
+
+ReadBlock:
+	IN		D,(C)
+	LD		(HL),D
+	XOR		D		; CHECKSUM XOR8 EN EL ACUMULADOR
+	INC		HL
+	EX		(SP),HL
+	EX		(SP),HL
+	DJNZ	ReadBlock
+	RET
 
 ; INIHRD
 ;
@@ -79,13 +149,8 @@ SECLEN		equ	512		; Size of biggest sector
 
 	PUBLIC	INIHRD
 INIHRD:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_INIHRD
-	LD		BC,0800H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
+	LD		A,CMD_INIHRD
+	CALL	WriteCommand
 	RET
 
 ; DRIVES
@@ -100,17 +165,12 @@ INIHRD:
 
 	PUBLIC	DRIVES
 DRIVES:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_DRIVES
-	LD		BC,0800H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
-	ld	l,1
-	ret
-
-
+	PUSH	AF
+	LD		A,CMD_DRIVES
+	CALL	WriteCommand
+	POP		AF
+	LD		L,1
+	RET
 
 ; INIENV
 ;
@@ -123,93 +183,30 @@ DRIVES:
 
 	PUBLIC	INIENV
 INIENV:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_INIENV
-	LD		BC,0800H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
-	call	GETWRK
-	ld		(hl),1
-	ld		hl,INTHAND
-	jp		SETINT
+	LD		A,CMD_INIENV
+	CALL	WriteCommand
+	CALL	GETWRK
+	LD		(HL),1
+	LD		HL,INTHAND
+	JP		SETINT
 
 INTHAND:	
-	push	af
-	push	bc
-	push	de
-	push	hl
-	push	ix
-	push	iy
+	PUSH	AF
+	PUSH	BC
+	PUSH	DE
+	PUSH	HL
+	PUSH	IX
+	PUSH	IY
 	call	GETWRK
-	inc	(hl)
-	pop	iy
-	pop	ix
-	pop	hl
-	pop	de
-	pop	bc
-	pop	af
-	jp	PRVINT
+	inc		(hl)
+	pop		iy
+	pop		ix
+	pop		hl
+	pop		de
+	pop		bc
+	pop		af
+	jp		PRVINT
 
-WriteByte:
-	OUT		(0),A
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	RET
-
-WriteCommand:
-	OUT		(0),A
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	RET
-
-WriteIO:
-	OUTI
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	JR		NZ,WriteIO
-	RET
-
-ReadIO:
-	INI
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	NOP
-	JR		NZ,ReadIO
-	RET
-	
 ;
 ; DSKIO
 ;
@@ -231,7 +228,7 @@ DSKIO:
 	PUSH	AF
 	JP      NC,READ         ;if no carry, we should read
 WRITE:
-	LD		A,0F0H			;write
+	LD		A,CMD_WRITE		;write
 	CALL	WriteCommand
 	POP		AF				;drive number
 	CALL	WriteByte
@@ -239,25 +236,28 @@ WRITE:
 	CALL	WriteByte
 	LD		A,C				;media
 	CALL	WriteByte
-	LD		A,D				;sec H
+	LD		A,H
 	CALL	WriteByte
-	LD		A,E				;sec L
+	LD		A,L
 	CALL	WriteByte
-	
+	LD		A,D				;sec Hi
+	CALL	WriteByte
+	LD		A,E				;sec Lo
+	CALL	WriteByte
 WRSEC:
-	PUSH	BC
-	LD		BC,0
-	CALL	WriteIO			;256 bytes
-	CALL	WriteIO			;256 bytes
+	PUSH	BC				;only B matters
+	LD		BC,0			;B=0 to count until 256, C=0 for OUTI
+	CALL	WriteBlock		;256 bytes
+	CALL	WriteBlock		;256 bytes
 	POP		BC
-	DJNZ	WRSEC
+	DJNZ	WRSEC			;relative jump
 	;ld		a,12
 	scf
 	ccf						;no errors
 	ret
 	
 READ:
-	LD		A,0F1H			;read
+	LD		A,CMD_READ		;read
 	CALL	WriteCommand
 	POP		AF				;drive number
 	CALL	WriteByte		
@@ -265,22 +265,35 @@ READ:
 	CALL	WriteByte		
 	LD		A,C				;media
 	CALL	WriteByte
+	LD		A,H
+	CALL	WriteByte
+	LD		A,L
+	CALL	WriteByte
 	LD		A,D				;sec H
 	CALL	WriteByte
 	LD		A,E				;sec L
 	CALL	WriteByte
-
 RDSEC:
-	PUSH	BC
-	LD		BC,0
-	CALL	ReadIO			;256 bytes
-	CALL	ReadIO			;256 bytes
+	PUSH	BC				;only B matters
+	LD		BC,0			;B=0 to count until 256 bytes, C=0 for INI
+	XOR		A				;calculated checksum
+	CALL	ReadBlock		;256 bytes
+	CALL	ReadBlock		;256 bytes
+	;INC		C				;C=1
+	;IN		D,(C)			;remote checksum
 	POP		BC
-	DJNZ	RDSEC
+	;CP		D				;compare checksums
+	;JR		Z,RDS_CONTINUE
+	;SCF
+	;LD		A,4				;checksum error
+	;RET
+RDS_CONTINUE:
+	DJNZ	RDSEC			;relative jump
 	;ld		a,12
 	scf
 	ccf						;no errors
 	ret
+
 
 ; DSKCHG
 ;
@@ -301,18 +314,9 @@ RDSEC:
 
 	PUBLIC	DSKCHG
 DSKCHG:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_DSKCHG
-	LD		BC,0800H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
-	or	a
-	ld	b,1
-	ret
-
-
+	OR		A
+	LD		B,1
+	RET
 
 ; GETDPB
 ;
@@ -327,20 +331,17 @@ DSKCHG:
 
 	PUBLIC	GETDPB
 GETDPB:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_GETDPB
-	LD		BC,0800H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
-	or		a
-	ex		de,hl
-	inc		de
-	ld		hl,DpbTable
-	ld		bc,18
-	ldir
-	ret
+	PUSH	AF
+	LD		A,CMD_GETDPB
+	CALL	WriteCommand
+	POP		AF
+	OR		A			;???
+	EX		DE,HL		;porque no existe LD DE,HL
+	INC		DE
+	LD		HL,DpbTable
+	LD		BC,18
+	LDIR
+	RET
 
 DpbTable:
 	db		0F9h	; Media F9
@@ -358,7 +359,9 @@ DpbTable:
 	dw		7
 
 	PUBLIC	DEFDPB
-DEFDPB		equ	DpbTable
+DEFDPB		equ	DpbTable-1
+
+
 
 ; CHOICE
 ;
@@ -368,13 +371,11 @@ DEFDPB		equ	DpbTable
 
 	PUBLIC	CHOICE
 CHOICE:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_CHOICE
-	LD		BC,0800H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
+	;LD		HL,S_CHOICE
+	;LD		BC,8
+	;CALL	SENDSTR
+	LD		A,CMD_CHOICE
+	CALL	WriteCommand
 	ld		hl,ChoiceStr
 	ret
 
@@ -400,13 +401,11 @@ ChoiceStr:
 
 	PUBLIC	DSKFMT
 DSKFMT:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_DSKFMT
-	LD		BC,0800H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
+	;LD		HL,S_DSKFMT
+	;LD		B,8
+	;CALL	SENDSTR
+	LD		A,CMD_DSKFMT
+	CALL	WriteCommand
 	ld		a,16
 	scf
 	ret
@@ -424,16 +423,121 @@ DSKFMT:
 
 	PUBLIC	OEMSTATEMENT
 OEMSTATEMENT:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_OEMSTATEMENT
-	LD		BC,0E00H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
-	scf
-	ret
+; BASIC CALL EXTENSION handler
+	PUSH    HL
+	LD		HL,CMDS	        ; Table with CALL extensions
+.CHKCMD:
+	LD		DE,PROCNM
+.LOOP:		
+	LD		A,(DE)
+	CP		(HL)
+	JR		NZ,.TONEXTCMD	; Not equal
+	INC		DE
+	INC		HL
+	AND		A
+	JR		NZ,.LOOP		; No end of command name, go checking
+	LD		E,(HL)
+	INC		HL
+	LD		D,(HL)
+	POP		HL				; routine address
+	CALL	GETPREVCHAR
+	CALL	.CALLDE			; Call routine
+	AND		A
+	RET
 
+.TONEXTCMD:
+	LD		C,0FFH
+	XOR		A
+	CPIR					; Skip to end of command name
+	INC		HL
+	INC		HL				; Skip address
+	CP		(HL)
+	JR		NZ,.CHKCMD		; Not end of table, go checking
+	POP		HL
+    SCF
+	RET
+	
+.CALLDE:
+	PUSH	DE
+	RET
+
+GETPREVCHAR:
+	DEC		HL
+	LD		IX,CHRGTR
+	JP      CALBAS
+
+;---------------------------
+CMDS:
+; List of available commands (as ASCIIZ) and execute address (as word)
+
+	DEFB	"FFILES",0
+	DEFW	_FFILES
+	DEFB	"FSAVE",0
+	DEFW	_FSAVE
+	DEFB	0               ; No more commands
+
+PRINTHEX:
+	PUSH	AF
+	PUSH	AF
+    CALL 	_Num1
+	CALL	CHPUT
+	POP		AF
+	CALL 	_Num2
+	CALL	CHPUT
+	POP		AF
+	RET  	; return with hex number in de
+_Num1:
+	RRA
+	RRA
+	RRA
+	RRA
+_Num2:       
+	OR		0F0h
+	DAA
+	ADD 	A,0A0h
+	ADC 	A,040h ; Ascii hex at this point (0 to F)   
+	RET	
+
+_FFILES:
+	PUSH	HL
+	LD		HL,$SECBUF
+	LD		A,H
+	CALL	PRINTHEX
+	LD		A,L
+	CALL	PRINTHEX
+	LD		A,13
+	CALL	CHPUT
+	LD		A,10
+	CALL	CHPUT
+;	LD		HL,PR_LEN
+;	LD		A,H
+;	CALL	PRINTHEX
+;	LD		A,L
+;	CALL	PRINTHEX
+	LD		A,13
+	CALL	CHPUT
+	LD		A,10
+	CALL	CHPUT
+;	LD		HL,PW_LEN
+;	LD		A,H
+;	CALL	PRINTHEX
+;	LD		A,L
+;	CALL	PRINTHEX
+	LD		A,13
+	CALL	CHPUT
+	LD		A,10
+	CALL	CHPUT
+	POP		HL
+	OR		A
+	RET
+
+_FSAVE:
+	;CALL	_STRCMD
+	LD		A,CMD_FSAVE
+	CALL	WriteCommand
+	OR		A
+	RET
+	
 ; MTOFF
 ;
 ; Input:	None
@@ -442,14 +546,81 @@ OEMSTATEMENT:
 
 	PUBLIC	MTOFF
 MTOFF:
-	PUSH	HL
-	PUSH	BC
-	LD		HL,S_MTOFF
-	LD		BC,0700H
-	CALL	WriteIO
-	POP		BC
-	POP		HL
+	;LD		HL,S_MTOFF
+	;LD		B,7
+	;CALL	SENDSTR
+	LD		A,CMD_MTOFF
+	CALL	WriteCommand
 	ret
+
+_STRCMD:
+	PUSH	AF
+	CALL	EVALTXTPARAM	; Evaluate text parameter
+	PUSH	HL
+    CALL    GETSTRPNT
+	CALL	SENDSTR
+	POP		HL
+	POP		AF
+	;OUT		(CMDPORT),A
+	;CALL	DEMORA
+	CALL	WriteCommand
+	OR      A
+	RET
+
+SENDSTR:
+	LD		A,CMD_SENDSTR
+	CALL	WriteCommand
+SENDSTR_LOOP:
+	LD		A,(HL)
+	CALL	WriteByte
+	INC		HL
+	DJNZ	SENDSTR_LOOP
+	RET
+
+;---------------------------
+GETSTRPNT:
+; OUT:
+; HL = String Address
+; B  = Lenght
+
+	LD      HL,(USR)
+	LD      B,(HL)
+	INC     HL
+	LD      E,(HL)
+	INC     HL
+	LD      D,(HL)
+	EX      DE,HL
+	RET
+
+EVALTXTPARAM:
+	CALL	CHKCHAR
+	DEFB	"("             ; Check for (
+	LD		IX,FRMEVL
+	CALL	CALBAS			; Evaluate expression
+	LD      A,(VALTYP)
+	CP      3               ; Text type?
+	JP      NZ,TYPE_MISMATCH
+	CALL	CHKCHAR
+	DEFB	")"             ; Check for )
+	RET
+
+CHKCHAR:
+	CALL	GETPREVCHAR		; Get previous basic char
+	EX		(SP),HL
+	CP		(HL) 	        ; Check if good char
+	JR		NZ,SYNTAX_ERROR	; No, Syntax error
+	INC		HL
+	EX		(SP),HL
+	INC		HL				; Get next basic char
+
+TYPE_MISMATCH:
+	LD      E,13
+	DB      1
+
+SYNTAX_ERROR:
+	LD      E,2
+	LD		IX,ERRHAND		; Call the Basic error handler
+	JP		CALBAS
 
 S_INIHRD:
 	DB	"INIHRD", 13, 10
