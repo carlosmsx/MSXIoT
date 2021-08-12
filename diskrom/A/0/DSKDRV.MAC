@@ -94,6 +94,7 @@ MYSIZE		equ	1		; Size of environment
 SECLEN		equ	512		; Size of biggest sector
 
 ;----Commands----
+CMD_DEBUG	EQU		0D0H
 CMD_SENDSTR	EQU		0E0H
 CMD_FSAVE	EQU		0E1H
 CMD_WRITE	EQU		0F0H
@@ -169,7 +170,7 @@ DRIVES:
 	LD		A,CMD_DRIVES
 	CALL	WriteCommand
 	POP		AF
-	LD		L,1
+	LD		L,2
 	RET
 
 ; INIENV
@@ -183,8 +184,13 @@ DRIVES:
 
 	PUBLIC	INIENV
 INIENV:
+	PUSH	AF
 	LD		A,CMD_INIENV
 	CALL	WriteCommand
+	POP		AF
+	
+	RET		;do nothing
+	
 	CALL	GETWRK
 	LD		(HL),1
 	LD		HL,INTHAND
@@ -197,15 +203,15 @@ INTHAND:
 	PUSH	HL
 	PUSH	IX
 	PUSH	IY
-	call	GETWRK
-	inc		(hl)
-	pop		iy
-	pop		ix
-	pop		hl
-	pop		de
-	pop		bc
-	pop		af
-	jp		PRVINT
+	CALL	GETWRK
+	INC		(HL)
+	POP		IY
+	POP		IX
+	POP		HL
+	POP		DE
+	POP		BC
+	POP		AF
+	JP		PRVINT
 
 ;
 ; DSKIO
@@ -244,6 +250,7 @@ WRITE:
 	CALL	WriteByte
 	LD		A,E				;sec Lo
 	CALL	WriteByte
+	LD		D,B				;store n-sectors ;/\
 WRSEC:
 	PUSH	BC				;only B matters
 	LD		BC,0			;B=0 to count until 256, C=0 for OUTI
@@ -251,10 +258,10 @@ WRSEC:
 	CALL	WriteBlock		;256 bytes
 	POP		BC
 	DJNZ	WRSEC			;relative jump
-	;ld		a,12
-	scf
-	ccf						;no errors
-	ret
+	LD		B,D				;restore n-sectors ;/\
+	SCF
+	CCF						;no errors
+	RET
 	
 READ:
 	LD		A,CMD_READ		;read
@@ -280,6 +287,13 @@ RDSEC:
 	CALL	ReadBlock		;256 bytes
 	CALL	ReadBlock		;256 bytes
 	;INC		C				;C=1
+	
+	PUSH	AF
+	LD		A,CMD_DEBUG
+	CALL	WriteCommand
+	POP		AF
+	CALL	WriteByte
+	
 	;IN		D,(C)			;remote checksum
 	POP		BC
 	;CP		D				;compare checksums
@@ -290,9 +304,9 @@ RDSEC:
 RDS_CONTINUE:
 	DJNZ	RDSEC			;relative jump
 	;ld		a,12
-	scf
-	ccf						;no errors
-	ret
+	SCF
+	CCF						;no errors
+	RET
 
 
 ; DSKCHG
@@ -314,6 +328,10 @@ RDS_CONTINUE:
 
 	PUBLIC	DSKCHG
 DSKCHG:
+	PUSH	AF
+	LD		A,CMD_DSKCHG
+	CALL	WriteCommand
+	POP		AF
 	OR		A
 	LD		B,1
 	RET
@@ -359,8 +377,7 @@ DpbTable:
 	dw		7
 
 	PUBLIC	DEFDPB
-DEFDPB		equ	DpbTable-1
-
+DEFDPB		equ	DpbTable	;NO DpbTable-1 because it make it fail
 
 
 ; CHOICE
@@ -371,20 +388,19 @@ DEFDPB		equ	DpbTable-1
 
 	PUBLIC	CHOICE
 CHOICE:
-	;LD		HL,S_CHOICE
-	;LD		BC,8
-	;CALL	SENDSTR
+	PUSH	AF
 	LD		A,CMD_CHOICE
 	CALL	WriteCommand
-	ld		hl,ChoiceStr
-	ret
+	POP		AF
+	LD		HL,ChoiceStr
+	RET
 
 ChoiceStr:	
-	db		13,10
-	db		"1 - Choice A",13,10
-	db		"2 - Choice B",13,10
-	db		13,10
-	db		0
+	DB		13,10
+	DB		"1 - Choice A",13,10
+	DB		"2 - Choice B",13,10
+	DB		13,10
+	DB		0
 
 
 
@@ -401,14 +417,13 @@ ChoiceStr:
 
 	PUBLIC	DSKFMT
 DSKFMT:
-	;LD		HL,S_DSKFMT
-	;LD		B,8
-	;CALL	SENDSTR
+	PUSH	AF
 	LD		A,CMD_DSKFMT
 	CALL	WriteCommand
-	ld		a,16
-	scf
-	ret
+	POP		AF
+	LD		A,16
+	SCF
+	RET
 
 
 
@@ -546,12 +561,11 @@ _FSAVE:
 
 	PUBLIC	MTOFF
 MTOFF:
-	;LD		HL,S_MTOFF
-	;LD		B,7
-	;CALL	SENDSTR
+	PUSH	AF
 	LD		A,CMD_MTOFF
 	CALL	WriteCommand
-	ret
+	POP		AF
+	RET
 
 _STRCMD:
 	PUSH	AF

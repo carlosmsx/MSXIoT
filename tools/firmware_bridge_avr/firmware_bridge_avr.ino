@@ -3,41 +3,7 @@
 #include <YetAnotherPcInt.h>
 #include <SPI.h>
 #include <SD.h>
-//#include "asm_helper.h"
-
-//DATA BUS: PB0, PB1, PD2, PD3, PD4, PD5, PD6, PD7 
-//CONTROL: PC0, PC1, PC2, PC3
-
-#define MSX_CS_PIN A0 
-#define MSX_A0_PIN A1
-#define MSX_RD_PIN A2
-#define MSX_EN_PIN A3
-#define CS 10
-
-#define CMD_SENDSTR   0xE0
-#define CMD_FSAVE     0xE1
-#define CMD_WRITE     0xF0
-#define CMD_READ      0xF1
-#define CMD_INIHRD    0xF2
-#define CMD_INIENV    0xF3
-#define CMD_DRIVES    0xF4
-#define CMD_DSKCHG    0xF5
-#define CMD_CHOICE    0xF6
-#define CMD_DSKFMT    0xF7
-#define CMD_OEMSTAT   0xF8
-#define CMD_MTOFF     0xF9
-#define CMD_GETDPB    0xFA
-
-#define CMD_PARAM__DRIVE_NUMBER   0
-#define CMD_PARAM__N_SECTORS      1
-#define CMD_PARAM__MEDIA          2
-#define CMD_PARAM__SECTOR_H       3
-#define CMD_PARAM__SECTOR_L       4
-#define CMD_PARAM__ADDR_H         5
-#define CMD_PARAM__ADDR_L         6
-#define CMD_ST__READING_SEC       10
-#define CMD_ST__READ_CRC          11
-#define CMD_ST__WRITING_SEC       20
+#include "msxiot_firmware.h"
 
 String hexByte(uint8_t b)
 {
@@ -49,12 +15,14 @@ String hexByte(uint8_t b)
 
 //File dsk[2];
 File dsk;
+volatile bool _debug = false;
 volatile uint8_t _stat=0;
 //volatile uint16_t _idx=0;
 volatile uint8_t _cmd;
 volatile uint8_t _cmd_st;
+volatile uint8_t _checksum=0;
 
-volatile uint16_t _total=0;
+volatile uint32_t _total=0;
 volatile uint8_t _drive_number, _last_drv=0;
 volatile uint8_t _n_sectors;
 volatile uint8_t _media;
@@ -71,10 +39,33 @@ volatile uint16_t _idx_sec=0;
 String diskFile(uint8_t drive)
 {
   if (drive == 0)
-    return "MSXDOS.DSK";
+    return "4K720.DSK";
   else
     return "TPASCAL.DSK";
 }
+
+void listFiles()
+{
+  Serial.println("listFiles()");
+  File dir = SD.open("/");
+  while (true) {
+    File entry =  dir.openNextFile();
+    if (! entry) {
+      // no more files
+      break;
+    }
+
+    if (!entry.isDirectory()) {
+      Serial.print(entry.name());
+      Serial.print("\t\t");
+      Serial.println(entry.size(), DEC);
+    }
+
+    entry.close();
+  }
+  dir.close();
+}
+
 
 void configDataBusAsInput()
 {
@@ -101,6 +92,12 @@ byte writeDataBusByte(byte x)
 
 void processCommand(uint8_t command)
 {
+  if (command == CMD_DEBUG)
+  {
+    _debug = true;
+    return;
+  }
+  
   _cmd = command;
 
   //resincronizo datos a recibir
@@ -112,6 +109,7 @@ void processCommand(uint8_t command)
       break;
     case CMD_FSAVE:
       Serial.println("CMD_FSAVE");
+      listFiles();
       break;
     case CMD_WRITE:
       _cmd_st = CMD_PARAM__DRIVE_NUMBER;
@@ -155,6 +153,13 @@ void processCommand(uint8_t command)
 
 void processData(uint8_t data)
 {
+  if (_debug)
+  {
+    Serial.println("DEBUG="+hexByte(data));
+    _debug = false;
+    return;
+  }
+  
   switch (_cmd)
   {
     case CMD_SENDSTR:
@@ -168,6 +173,7 @@ void processData(uint8_t data)
       switch (_cmd_st)
       {
         case CMD_PARAM__DRIVE_NUMBER: 
+          Serial.println("DRIVE NUMBER="+hexByte(data));
           _drive_number = data; 
           _cmd_st = CMD_PARAM__N_SECTORS; 
           break;
@@ -188,30 +194,68 @@ void processData(uint8_t data)
           _cmd_st = CMD_PARAM__SECTOR_H;
           break;
         case CMD_PARAM__SECTOR_H: 
+          Serial.println("SECTOR(H)="+hexByte(data));
           _sec_H = data;    
           _cmd_st = CMD_PARAM__SECTOR_L;
           break;
         case CMD_PARAM__SECTOR_L: 
+          Serial.println("SECTOR(L)="+hexByte(data));
           _sec_L = data;
           _sector = (uint16_t)_sec_H<<8 | _sec_L;
           _address = (uint16_t)_addr_H<<8 | _addr_L;
-          _sector_pos = _sector * 512; 
-          _total = _n_sectors * 512; 
+          _sector_pos = (uint32_t)_sector * 512; 
+          _total = (uint32_t)_n_sectors * 512; 
           _idx_sec = 0;
           Serial.println(" I/O drive="+String(_drive_number)+" ns="+String(_n_sectors)+" media="+String(_media,HEX));
           Serial.println("     sector="+String(_sector)+ "["+ hexByte(_sec_H)+ hexByte(_sec_L) +"] total="+ String(_total)+ " cmd="+hexByte(_cmd));
           Serial.println("     address="+String(_address)+ "["+ hexByte(_addr_H)+ hexByte(_addr_L) +"] sector pos="+String(_sector_pos));
 
+          /*
           if (_drive_number != _last_drv)
           {
             _last_drv = _drive_number;
             dsk.close();
             dsk = SD.open(diskFile(_drive_number), O_RDWR);
           }
+          */
 
-          Serial.println(dsk.name());
+          if ( _cmd == CMD_READ )
+          {
+            dsk = SD.open(diskFile(_drive_number), O_READ); //abro imagen para lectura
+            _cmd_st = CMD_ST__READING_SEC;
+          }
+          else
+          {
+            dsk = SD.open(diskFile(_drive_number), O_RDWR); //abro imagen para lectura+escritura
+            _cmd_st = CMD_ST__WRITING_SEC;
+          }
           dsk.seek(_sector_pos);
-          _cmd_st = (_cmd == CMD_READ ? CMD_ST__READING_SEC : CMD_ST__WRITING_SEC);
+          Serial.println(dsk.name());
+          break;
+        case CMD_ST__WRITING_SEC:
+          //write byte to SD
+          dsk.write(data);
+          Serial.print(hexByte(data));
+          _total--;
+          if (_total % 32 == 0)
+            Serial.println();
+          
+          if (_total == 0)
+          {
+            _cmd = 0;
+            _cmd_st = 0;
+            dsk.close();
+          }
+          
+          _idx_sec++;
+          if ( _idx_sec == 512 )
+          {
+            _idx_sec = 0;
+            Serial.println("CHECKSUM=...TODO");
+            //_checksum = 0;
+            //_cmd_st = CMD_ST__READ_CRC;
+            dsk.flush();
+          }
           break;
       }
       break;
@@ -227,6 +271,7 @@ uint8_t dataToSend()
       {
         //read byte from SD
         uint8_t b = dsk.read();
+        _checksum = _checksum ^ b;
         Serial.print(hexByte(b));
         _total--;
         if (_total % 32 == 0)
@@ -235,17 +280,17 @@ uint8_t dataToSend()
         if (_total == 0)
         {
           _cmd = 0;
-          //dsk.close();
+          dsk.close();
         }
         
         _idx_sec++;
-        /*
         if ( _idx_sec == 512 )
         {
           _idx_sec = 0;
-          _cmd_st = CMD_ST__READ_CRC;
+          Serial.println("CHECKSUM="+hexByte(_checksum));
+          _checksum = 0;
+          //_cmd_st = CMD_ST__READ_CRC;
         }
-        */
         return b;
       }
       /*
@@ -277,7 +322,7 @@ void pinChanged_sd(const char* message, bool pinstate)  //rutina de testeo
   }
   else
   {
-    delayMicroseconds(10);
+    delayMicroseconds(50);
     Serial.print(digitalRead(MSX_A0_PIN));
     Serial.print(digitalRead(MSX_RD_PIN));
     
@@ -292,15 +337,17 @@ void pinChanged_sd(const char* message, bool pinstate)
 {
   if (pinstate)
   { 
+    //La interrupción se produjo porque el decoder deja de seleccionar la interfaz
     configDataBusAsInput();
     digitalWrite(MSX_EN_PIN, HIGH); //habilito
   }
   else
   {
+    //La interrupción se produjo porque el decoder selecciona la interfaz
     delayMicroseconds(10);
     if (digitalRead(MSX_A0_PIN) == LOW)
     {
-      //DATA REGISTER
+      //se accede al DATA REGISTER
       if (digitalRead(MSX_RD_PIN) == LOW)
       {
         //MSX lee un byte
@@ -316,7 +363,7 @@ void pinChanged_sd(const char* message, bool pinstate)
     }
     else
     {
-      //COMMAND/STATUS REGISTER
+      //se accede al COMMAND/STATUS REGISTER
       if (digitalRead(MSX_RD_PIN) == LOW)
       {
         //MSX lee registro de estado
@@ -527,6 +574,7 @@ void setup() {
     delay(1000);
   }
 
+  /*
   Serial.print("OK\nimagen0:");
   Serial.print(diskFile(0));
   do
@@ -537,6 +585,7 @@ void setup() {
   } while (!dsk);
 
   Serial.println("OK");
+  */
 
   digitalWrite(MSX_EN_PIN, LOW); //deshabilito el decoder
   PcInt::attachInterrupt(MSX_CS_PIN, pinChanged_sd, "Pin has changed to ", CHANGE);
